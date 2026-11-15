@@ -10,6 +10,9 @@ import {runWebhookJobs} from '../../src/lib/server/core/webhook-jobs';
 import {previewRetryBatchNotificationRetryBatch,commitRetryBatchNotificationRetryBatch,type NotificationRetryBatchRow,type NotificationRetryItemRow} from '../../src/lib/server/core/retry-batch-notification-retry-batches';
 import {runRetryBatchNotificationRetryJobs} from '../../src/lib/server/core/retry-batch-notification-retry-jobs';
 import {retryRetryBatchNotificationDelivery} from '../../src/lib/server/core/retry-batch-notification-retry';
+import {cancelRetryBatchNotificationRetryBatch} from '../../src/lib/server/core/retry-batch-notification-retry-controls';
+import {exportRetryBatchNotificationSyncStatement} from '../../src/lib/server/core/retry-batch-notification-retry-shared';
+import {stableId} from '../../src/lib/server/core/crypto';
 import type {RuntimeEnv} from '../../src/lib/server/core/types';
 
 let mf:Miniflare,ctx:OwnerContext,env:RuntimeEnv,schema:string[],at:number;
@@ -145,3 +148,92 @@ it('keeps a valid audit and queue mutation atomic when a real SQL clock crosses 
   expect(Number(await env.DB.prepare('SELECT at FROM notice_deadline_observation').first('at'))).toBeGreaterThanOrEqual(until);
   expect(result.delivery.state).toBe('pending');expect(result.delivery.attemptBudget).toBe(16);expect((await audits()).results).toHaveLength(1);
 },30_000);
+
+it('refuses a stale claim after cancellation and never revives cancelled previews during expiry cleanup',async()=>{
+  const box=await fixture(2),batch=await committed(box.id);let release!:()=>void,entered!:()=>void,calls=0;
+  const waiting=new Promise<void>(resolve=>{release=resolve;}),started=new Promise<void>(resolve=>{entered=resolve;});
+  const paused=database(async(target,statements)=>{if(++calls===1){entered();await waiting;}return target.batch(statements);});
+  const facts=await sourceFacts(),pending=run({DB:paused},1);await started;
+  const cancelled=await cancelRetryBatchNotificationRetryBatch(ctx,box.id,batch.id,{clientRequestId:crypto.randomUUID(),expectedVersion:batch.version});
+  expect(cancelled.batch).toMatchObject({state:'cancelled',skippedItems:2,unknownItems:0});release();
+  expect(await pending).toMatchObject({noticeBatchRetryProcessed:0,noticeBatchRetryRequeued:0});
+  expect((await items(batch.id)).results.every(item=>item.state==='skipped'&&item.reason==='batch_cancelled')).toBe(true);
+  expect((await audits()).results).toHaveLength(0);expect(await sourceFacts()).toEqual(facts);
+  const previewed=await preview(box.id),stopped=await cancelRetryBatchNotificationRetryBatch(ctx,box.id,previewed.batch.id,{clientRequestId:crypto.randomUUID(),expectedVersion:previewed.batch.version});
+  const retained=await raw(stopped.batch.id),retainedItems=(await items(stopped.batch.id)).results;at=stopped.batch.expiresAt+1;
+  expect(await run()).toMatchObject({noticeBatchRetryProcessed:0,noticeBatchRetryRequeued:0});
+  expect(await raw(stopped.batch.id)).toEqual(retained);expect((await items(stopped.batch.id)).results).toEqual(retainedItems);
+  expect(retained).toMatchObject({state:'preview',committed_at:null,cancelled_at:stopped.batch.cancelledAt});
+  expect(await projectRetryBatchNotifications(env,{now:()=>at})).toMatchObject({retryBatchNotificationsProjected:0});expect(await sourceFacts()).toEqual(facts);
+},30_000);
+
+it('fences a previously claimed executor at the audited retry boundary after Owner cancellation',async()=>{
+  const box=await fixture(2),batch=await committed(box.id);let release!:()=>void,entered!:()=>void,calls=0;
+  const waiting=new Promise<void>(resolve=>{release=resolve;}),started=new Promise<void>(resolve=>{entered=resolve;});
+  const paused=database(async(target,statements)=>{if(++calls===2){entered();await waiting;}return target.batch(statements);});
+  const facts=await sourceFacts(),pending=run({DB:paused},1);await started;
+  const before=(await raw(batch.id))!,running=(await items(batch.id)).results.find(item=>item.state==='running')!;
+  const cancelled=await cancelRetryBatchNotificationRetryBatch(ctx,box.id,batch.id,{clientRequestId:crypto.randomUUID(),expectedVersion:before.version});
+  expect(cancelled.batch).toMatchObject({state:'cancelled',skippedItems:1,unknownItems:1});release();await pending;
+  expect((await items(batch.id)).results.find(item=>item.delivery_id===running.delivery_id)).toMatchObject({state:'unknown',reason:'result_unknown',lease_token:null,lease_until:null});
+  expect((await audits()).results).toHaveLength(0);at+=60001;
+  expect(await run()).toMatchObject({noticeBatchRetryProcessed:0,noticeBatchRetryRequeued:0,noticeBatchRetryReconciled:0});
+  expect((await items(batch.id)).results.find(item=>item.delivery_id===running.delivery_id)?.state).toBe('unknown');
+  expect((await env.DB.prepare('SELECT attempt_budget FROM webhook_deliveries WHERE mailbox_id=?').bind(box.id).all<{attempt_budget:number}>()).results.every(row=>row.attempt_budget===8)).toBe(true);
+  expect(await sourceFacts()).toEqual(facts);expect(await projectRetryBatchNotifications(env,{now:()=>at})).toMatchObject({retryBatchNotificationsProjected:0});
+},30_000);
+
+it('restores a receipt committed before cancellation even after task expiry without replaying the retry',async()=>{
+  const box=await fixture(2),batch=await committed(box.id);let release!:()=>void,entered!:()=>void,calls=0;
+  const waiting=new Promise<void>(resolve=>{release=resolve;}),started=new Promise<void>(resolve=>{entered=resolve;});
+  const paused=database(async(target,statements)=>{if(++calls===3){entered();await waiting;}return target.batch(statements);});
+  const facts=await sourceFacts(),pending=run({DB:paused},1);await started;expect((await audits()).results).toHaveLength(1);
+  const running=(await items(batch.id)).results.find(item=>item.state==='running')!,before=(await raw(batch.id))!;
+  const cancelled=await cancelRetryBatchNotificationRetryBatch(ctx,box.id,batch.id,{clientRequestId:crypto.randomUUID(),expectedVersion:before.version});
+  expect(cancelled.batch).toMatchObject({state:'cancelled',unknownItems:1,skippedItems:1});release();await pending;
+  const cancellationMarker=(await raw(batch.id))!.cancelled_at;at=batch.expiresAt+1;
+  const fetcher=vi.spyOn(globalThis,'fetch').mockRejectedValue(Error('unexpected HTTP'));
+  expect(await run()).toMatchObject({noticeBatchRetryProcessed:0,noticeBatchRetryReconciled:1,noticeBatchRetryRequeued:1});
+  expect(await raw(batch.id)).toMatchObject({state:'running',cancelled_at:cancellationMarker,processed_items:2,requeued_items:1,skipped_items:1,unknown_items:0});
+  expect((await items(batch.id)).results.find(item=>item.delivery_id===running.delivery_id)).toMatchObject({state:'requeued',manual_retry_id:(await audits()).results[0].id});
+  expect((await audits()).results).toHaveLength(1);expect(await env.DB.prepare('SELECT attempt_budget FROM webhook_deliveries WHERE id=?').bind(running.delivery_id).first('attempt_budget')).toBe(16);
+  expect(fetcher).not.toHaveBeenCalled();expect(await sourceFacts()).toEqual(facts);
+  expect(await projectRetryBatchNotifications(env,{now:()=>at})).toMatchObject({retryBatchNotificationsProjected:0});
+},30_000);
+
+it('retains conflicting unknown receipts without monopolizing reconciliation of later cancelled items',async()=>{
+  const box=await fixture(2),batch=await committed(box.id),[conflict,found]=(await items(batch.id)).results;
+  const retried=await retryRetryBatchNotificationDelivery(ctx,box.id,found.notification_id,found.delivery_id,{clientRequestId:found.client_request_id,expectedUpdatedAt:found.expected_updated_at});
+  const conflictId=await stableId(`retry-batch-notification-retry:v1:${box.id}:${conflict.client_request_id}`);
+  await env.DB.prepare("INSERT INTO audit_events(id,mailbox_id,actor_kind,action,resource_id,outcome,request_id,metadata_json,occurred_at) VALUES(?,?,'owner','webhook.delivery_retried',?,'success',?,'{\"private\":true}',?)")
+    .bind(conflictId,box.id,conflict.delivery_id,ctx.requestId,at).run();
+  await env.DB.batch([(conflict),(found)].map(item=>env.DB.prepare("UPDATE retry_batch_notification_retry_items SET state='unknown',reason='result_unknown',completed_at=?,version=version+1,updated_at=updated_at+1 WHERE batch_id=? AND delivery_id=?").bind(at,batch.id,item.delivery_id)));
+  await exportRetryBatchNotificationSyncStatement(env,batch.id,at).run();
+  const before=(await raw(batch.id))!;await cancelRetryBatchNotificationRetryBatch(ctx,box.id,batch.id,{clientRequestId:crypto.randomUUID(),expectedVersion:before.version});
+  const facts=await sourceFacts(),budgets=(await env.DB.prepare('SELECT id,attempt_budget FROM webhook_deliveries ORDER BY id').all()).results;at+=60001;
+  const fetcher=vi.spyOn(globalThis,'fetch').mockRejectedValue(Error('unexpected HTTP'));
+  expect(await run()).toMatchObject({noticeBatchRetryProcessed:0,noticeBatchRetryReconciled:1,noticeBatchRetryRequeued:1});
+  expect((await items(batch.id)).results.find(item=>item.delivery_id===conflict.delivery_id)).toMatchObject({state:'unknown',reason:'receipt_conflict'});
+  expect((await items(batch.id)).results.find(item=>item.delivery_id===found.delivery_id)).toMatchObject({state:'requeued',manual_retry_id:retried.manualRetry.id});
+  expect(await raw(batch.id)).toMatchObject({processed_items:2,requeued_items:1,unknown_items:1});
+  expect(await run()).toMatchObject({noticeBatchRetryProcessed:0,noticeBatchRetryReconciled:0});
+  expect((await env.DB.prepare('SELECT id,attempt_budget FROM webhook_deliveries ORDER BY id').all()).results).toEqual(budgets);
+  expect(fetcher).not.toHaveBeenCalled();expect(await sourceFacts()).toEqual(facts);
+},30_000);
+
+it('preserves an unknown result and its timestamps when receipt storage is unavailable',async()=>{
+  const box=await fixture(),batch=await committed(box.id),item=(await items(batch.id)).results[0];
+  await env.DB.prepare("UPDATE retry_batch_notification_retry_items SET state='unknown',reason='result_unknown',completed_at=?,version=version+1,updated_at=updated_at+1 WHERE batch_id=?").bind(at,batch.id).run();
+  await exportRetryBatchNotificationSyncStatement(env,batch.id,at).run();const current=(await raw(batch.id))!;
+  await cancelRetryBatchNotificationRetryBatch(ctx,box.id,batch.id,{clientRequestId:crypto.randomUUID(),expectedVersion:current.version});
+  const before=(await items(batch.id)).results[0],parent=await raw(batch.id),facts=await sourceFacts();at+=60001;
+  const failed=new Proxy(env.DB,{get(target,key){if(key==='prepare')return(query:string)=>{
+    const prepared=target.prepare(query);if(query==='SELECT id,mailbox_id,action,resource_id,metadata_json,occurred_at FROM audit_events WHERE id=?')return new Proxy(prepared,{get(value,member){
+      if(member==='bind')return()=>({first:async()=>{throw Error('PRIVATE_RECEIPT_READ_FAILURE');}});const method=Reflect.get(value,member,value);return typeof method==='function'?method.bind(value):method;
+    }});return prepared;
+  };const value=Reflect.get(target,key,target);return typeof value==='function'?value.bind(target):value;}});
+  const errors=vi.spyOn(console,'error').mockImplementation(()=>{});
+  expect(await run({DB:failed},1)).toMatchObject({noticeBatchRetryProcessed:0,noticeBatchRetryReconciled:0,noticeBatchRetryRequeued:0});
+  expect((await items(batch.id)).results[0]).toEqual(before);expect(await raw(batch.id)).toEqual(parent);expect(await sourceFacts()).toEqual(facts);expect((await audits()).results).toHaveLength(0);
+  expect(errors).toHaveBeenCalledWith(JSON.stringify({event:'notice_retry_batch_reconcile_unavailable'}));expect(item.state).toBe('pending');
+});

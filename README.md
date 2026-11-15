@@ -69,6 +69,8 @@ Owner 可在导出通知详情追踪原通知决定、跳过原因、发布进�
 
 批次通知的失败投递可按当前邮箱、时间及安全原因冻结预览，明确确认后由后台每轮最多5项重新排队，保留幂等进度和逐条结果。独立任务表不再生成自身通知，避免递归重试；应用0020后共56张表，详见[通知失败投递批量重试](docs/retry-batch-notification-retry-batches.md)。
 
+Owner 可停止通知重试任务尚未执行的条目，保留已执行结果；运行中或未知条目通过原幂等收据核对，支持单条/批量操作和分页历史。取消与对账不增加重试预算、不生成递归通知，本轮复用0020无需新迁移，详见[通知重试任务取消与未知结果对账](docs/retry-batch-notification-retry-controls.md)。
+
 OAuth 客户端可通过发现、动态注册、PKCE 和 Owner 授权页连接，Owner 选择单个邮箱与权限并可撤销访问。已有实例需按序应用待迁移文件（当前最新 `0020_retry_batch_notification_retry_batches.sql`），静态 Token 保持可用且不会自动获得收件附件下载权限。详见[OAuth 接入与部署](docs/oauth.md)。
 
 ```sh

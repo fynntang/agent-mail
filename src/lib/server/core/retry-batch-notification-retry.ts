@@ -21,7 +21,7 @@ interface DeliveryRow {
   created_at:number;updated_at:number;completed_at:number|null;mailbox_status:string;endpoint_status:string;notification_decision:string|null;notification_id:string;batch_id:string;
   kind:RetryBatchNotificationRow['kind'];
 }
-interface AuditRow{id:string;mailbox_id:string;action:string;resource_id:string;metadata_json:string;occurred_at:number}
+export interface RetryBatchNotificationRetryReceiptRow{id:string;mailbox_id:string;action:string;resource_id:string;metadata_json:string;occurred_at:number}
 const changed=()=>new ServiceError('retry_batch_notification_retry_changed',409);
 const unavailable=()=>new ServiceError('retry_batch_notification_retry_unavailable',409);
 function deliveryDto(row:DeliveryRow):WebhookDelivery {
@@ -37,7 +37,7 @@ async function delivery(ctx:OwnerContext,box:string,notificationId:string,id:str
     WHERE n.id=? AND n.mailbox_id=? AND d.id=?`).bind(notificationId,box,id).first<DeliveryRow>();
   if(!row)throw new ServiceError('not_found',404);return row;
 }
-function receipt(row:AuditRow|null,box:string,notificationId:string,batchId:string,id:string,clientRequestId:string,expectedUpdatedAt:number):AsyncExportManualRetry|null {
+export function parseRetryBatchNotificationRetryReceipt(row:RetryBatchNotificationRetryReceiptRow|null,box:string,notificationId:string,batchId:string,id:string,clientRequestId:string,expectedUpdatedAt:number):AsyncExportManualRetry|null {
   if(!row)return null;
   try {
     const data=JSON.parse(row.metadata_json);
@@ -50,8 +50,8 @@ function receipt(row:AuditRow|null,box:string,notificationId:string,batchId:stri
 /** Read only the original scoped receipt, never a capability check or a new budget reservation. */
 export async function findRetryBatchNotificationRetryReceipt(env:RuntimeEnv,box:string,notificationId:string,batchId:string,id:string,clientRequestId:string,expectedUpdatedAt:number):Promise<AsyncExportManualRetry|null>{
   const auditId=await stableId(`retry-batch-notification-retry:v1:${box}:${clientRequestId}`);
-  const audit=await env.DB.prepare('SELECT id,mailbox_id,action,resource_id,metadata_json,occurred_at FROM audit_events WHERE id=?').bind(auditId).first<AuditRow>();
-  return receipt(audit,box,notificationId,batchId,id,clientRequestId,expectedUpdatedAt);
+  const audit=await env.DB.prepare('SELECT id,mailbox_id,action,resource_id,metadata_json,occurred_at FROM audit_events WHERE id=?').bind(auditId).first<RetryBatchNotificationRetryReceiptRow>();
+  return parseRetryBatchNotificationRetryReceipt(audit,box,notificationId,batchId,id,clientRequestId,expectedUpdatedAt);
 }
 /** Requeue an already-admitted frozen notice. The existing transport performs HTTP on a later tick. */
 export interface RetryBatchNotificationRetryInternalOptions {
@@ -64,9 +64,9 @@ export async function retryRetryBatchNotificationDelivery(ctx:OwnerContext,box:s
   const data=objectInput(input,['clientRequestId','expectedUpdatedAt']);
   if(typeof data.clientRequestId!=='string'||!uuid.test(data.clientRequestId)||typeof data.expectedUpdatedAt!=='number'||!Number.isSafeInteger(data.expectedUpdatedAt)||data.expectedUpdatedAt<0)throw new ServiceError('invalid_input',400);
   const clientRequestId=data.clientRequestId,expectedUpdatedAt=data.expectedUpdatedAt,auditId=await stableId(`retry-batch-notification-retry:v1:${box}:${clientRequestId}`);
-  const audit=()=>ctx.env.DB.prepare('SELECT id,mailbox_id,action,resource_id,metadata_json,occurred_at FROM audit_events WHERE id=?').bind(auditId).first<AuditRow>();
+  const audit=()=>ctx.env.DB.prepare('SELECT id,mailbox_id,action,resource_id,metadata_json,occurred_at FROM audit_events WHERE id=?').bind(auditId).first<RetryBatchNotificationRetryReceiptRow>();
   let current=await delivery(ctx,box,notificationId,id);
-  const previous=receipt(await audit(),box,notificationId,current.batch_id,id,clientRequestId,expectedUpdatedAt);
+  const previous=parseRetryBatchNotificationRetryReceipt(await audit(),box,notificationId,current.batch_id,id,clientRequestId,expectedUpdatedAt);
   if(previous)return {delivery:deliveryDto(current),manualRetry:previous,replayed:true};
   if(current.updated_at!==expectedUpdatedAt)throw changed();
   const event=await ctx.env.DB.prepare('SELECT * FROM events WHERE mailbox_id=? AND id=?').bind(box,current.event_id).first<WebhookEventRow>();
@@ -115,10 +115,10 @@ export async function retryRetryBatchNotificationDelivery(ctx:OwnerContext,box:s
         .bind(budget,now,now,...args,auditId,metadata)
     ]);changedDelivery=result[1].results.length===1;
   }catch(error){
-    const committed=receipt(await audit(),box,notificationId,current.batch_id,id,clientRequestId,expectedUpdatedAt);
+    const committed=parseRetryBatchNotificationRetryReceipt(await audit(),box,notificationId,current.batch_id,id,clientRequestId,expectedUpdatedAt);
     if(!committed)throw error;current=await delivery(ctx,box,notificationId,id);return {delivery:deliveryDto(current),manualRetry:committed,replayed:true};
   }
-  const committed=receipt(await audit(),box,notificationId,current.batch_id,id,clientRequestId,expectedUpdatedAt);
+  const committed=parseRetryBatchNotificationRetryReceipt(await audit(),box,notificationId,current.batch_id,id,clientRequestId,expectedUpdatedAt);
   if(!committed)throw changed();
   current=await delivery(ctx,box,notificationId,id);return {delivery:deliveryDto(current),manualRetry:committed,replayed:!changedDelivery};
 }

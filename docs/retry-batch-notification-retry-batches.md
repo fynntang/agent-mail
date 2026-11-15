@@ -44,7 +44,7 @@ Owner 在当前邮箱的批次通知面板旁，按失败时间和安全原因�
 
 结果为 pending、running、requeued、skipped、failed 或 unknown。processedItems 等于 requeued/skipped/failed/unknown 之和；completed 要求全部处理且 unknown 为0。requeued 只表示重新排队已核实，不代表接收端已经收到通知。
 
-版本变化、当前策略阻止、预览已阻止或到期会记录跳过原因；明确的密钥/载荷错误保留失败结果。丢ACK或租约恢复优先读取原单条重试收据，有收据则恢复 requeued；无证据时保留 unknown，仅做后续有界只读核对，不盲目重复提交，也不假报完成。本轮提供预览、确认和结果查看，未增加取消或人工修改未知结果接口。
+版本变化、当前策略阻止、预览已阻止或到期会记录跳过原因；明确的密钥/载荷错误保留失败结果。丢ACK或租约恢复优先读取原单条重试收据，有收据则恢复 requeued；无证据时保留 unknown，仅做后续有界只读核对，不盲目重复提交，也不假报完成。Owner 可[停止尚未执行的条目并手动核对未知结果](retry-batch-notification-retry-controls.md)，保留已经执行的结果和操作历史，不触发递归通知。
 
 ## Owner API
 
@@ -57,7 +57,7 @@ POST /owner/api/mailboxes/{mailboxId}/retry-batch-notification-retry-batches/{ba
 
 预览请求为 `{clientRequestId,from?,to?,reason?}`，成功201返回 `{batch,items,nextCursor,replayed}`。时间为Unix毫秒整数。确认请求为 `{clientRequestId,expectedVersion}`，成功202返回 `{batch,replayed}`。列表为 `{batches,nextCursor}`，详情为 `{batch,items,nextCursor}`；默认每页20、最多100，游标绑定邮箱、分页类型、任务和页大小。
 
-batch 返回固定筛选、状态、版本、各类计数、创建/更新/确认/完成及截止时间和 canCommit；item 返回 notificationId、sourceBatchId、deliveryId、expectedUpdatedAt、原失败信息、previewEligible/previewReason、结果/原因、manualRetryId及时间/版本。内部逐项UUID、租约、请求hash、签名密文、目标和载荷不返回。
+batch 返回固定筛选、状态、版本、各类计数、创建/更新/确认/完成及截止时间、cancelledAt、canCommit 和 canCancel；取消时对外状态为 cancelled。item 返回 notificationId、sourceBatchId、deliveryId、expectedUpdatedAt、原失败信息、previewEligible/previewReason、结果/原因、manualRetryId及时间/版本。内部逐项UUID、租约、请求hash、签名密文、目标和载荷不返回。
 
 所有接口需要 Access Owner；POST 另需正确 Origin。活动/暂停邮箱可读取和预览，只有活动邮箱能新确认；原已提交UUID仍可只读核对。静态 Token、OAuth、MCP 不开放该运维权限。400 `batch_retry_invalid`，413 `batch_retry_too_large`，410 `batch_retry_expired`，409 `batch_retry_changed` / `batch_retry_conflict` / `batch_retry_quota`；未知/重复查询参数及额外请求字段拒绝。
 

@@ -1,4 +1,4 @@
-import type {AsyncExportRetryBatchItemReason,AsyncExportRetryBatchItemState} from '../../types/async-export-notification-retry-batches';
+import type {RetryBatchNotificationRetryBatchItemReason,RetryBatchNotificationRetryBatchItemState} from '../../types/retry-batch-notification-retry-batches';
 import {findRetryBatchNotificationRetryReceipt,retryRetryBatchNotificationDelivery} from './retry-batch-notification-retry';
 import {getRetryBatchNotificationDelivery} from './retry-batch-notification-deliveries';
 import {exportRetryBatchNotificationSyncStatement} from './retry-batch-notification-retry-shared';
@@ -8,7 +8,7 @@ import {ServiceError,type RuntimeEnv} from './types';
 const LEASE_MS=120_000,RECONCILE_DELAY_MS=60_000;
 interface Item {
   batch_id:string;mailbox_id:string;delivery_id:string;notification_id:string;source_batch_id:string;expected_updated_at:number;client_request_id:string;
-  preview_eligible:number;preview_reason:AsyncExportRetryBatchItemReason|null;state:AsyncExportRetryBatchItemState;
+  preview_eligible:number;preview_reason:RetryBatchNotificationRetryBatchItemReason|null;state:RetryBatchNotificationRetryBatchItemState;
   version:number;lease_token:string|null;lease_until:number|null;created_at:number;updated_at:number;manual_retry_id:string|null;
   batch_state:'queued'|'running'|'expired';batch_expires_at:number;
 }
@@ -42,7 +42,7 @@ async function claim(env:RuntimeEnv,item:Item,at:number):Promise<Item|null>{
   return row?{...row,batch_state:item.batch_state,batch_expires_at:item.batch_expires_at}:null;
 }
 async function syncBatch(env:RuntimeEnv,item:{batch_id:string;mailbox_id:string},at:number):Promise<void>{await exportRetryBatchNotificationSyncStatement(env,item.batch_id,at).run();}
-async function checkpoint(env:RuntimeEnv,item:Item,state:ResultState,reason:AsyncExportRetryBatchItemReason|null,manualId:string|null,at:number):Promise<boolean>{
+async function checkpoint(env:RuntimeEnv,item:Item,state:ResultState,reason:RetryBatchNotificationRetryBatchItemReason|null,manualId:string|null,at:number):Promise<boolean>{
   const running=item.state==='running';
   const result=await env.DB.batch([statement(env,`UPDATE retry_batch_notification_retry_items SET state=?,reason=?,manual_retry_id=COALESCE(manual_retry_id,?),
     completed_at=COALESCE(completed_at,?),lease_token=NULL,lease_until=NULL,version=version+1,updated_at=MAX(updated_at+1,?)
@@ -60,7 +60,7 @@ function ownerContext(env:RuntimeEnv,item:Item):OwnerContext{
   return {env,actor:{kind:'owner',email:env.OWNER_EMAIL},requestId:`notice-retry-batch:${item.batch_id}:${item.delivery_id}`};
 }
 async function receipt(env:RuntimeEnv,item:Item){return findRetryBatchNotificationRetryReceipt(env,item.mailbox_id,item.notification_id,item.source_batch_id,item.delivery_id,item.client_request_id,item.expected_updated_at);}
-async function blocked(env:RuntimeEnv,item:Item,error:ServiceError):Promise<{state:ResultState;reason:AsyncExportRetryBatchItemReason}>{
+async function blocked(env:RuntimeEnv,item:Item,error:ServiceError):Promise<{state:ResultState;reason:RetryBatchNotificationRetryBatchItemReason}>{
   const mailbox=await statement(env,'SELECT status FROM mailboxes WHERE id=?',item.mailbox_id).first<{status:string}>();
   if(!mailbox||mailbox.status!=='active')return {state:'skipped',reason:'mailbox_inactive'};
   const batch=await statement(env,'SELECT state,expires_at,cancelled_at FROM retry_batch_notification_retry_batches WHERE id=?',item.batch_id).first<{state:string;expires_at:number;cancelled_at:number|null}>();
@@ -78,12 +78,19 @@ async function reconcile(env:RuntimeEnv,item:Item,now:()=>number,result:RetryBat
     const found=await receipt(env,item);
     if(found){if(await checkpoint(env,item,'requeued',null,found.id,now()))count(result,'requeued',true);}
     else await checkpoint(env,item,'unknown','result_unknown',null,now());
-  }catch{console.error(JSON.stringify({event:'notice_retry_batch_reconcile_unavailable'}));}
+  }catch(error){
+    if(error instanceof ServiceError&&error.code==='retry_batch_notification_retry_conflict'){
+      // Keep the unresolved proof explicit and advance its bounded read schedule so one
+      // conflicting receipt cannot monopolize every reconciliation slot on later ticks.
+      try{await checkpoint(env,item,'unknown','receipt_conflict',null,now());}
+      catch{console.error(JSON.stringify({event:'notice_retry_batch_reconcile_unavailable'}));}
+    }else console.error(JSON.stringify({event:'notice_retry_batch_reconcile_unavailable'}));
+  }
 }
 async function process(env:RuntimeEnv,original:Item,now:()=>number,result:RetryBatchNotificationRetryJobResult):Promise<void>{
   if(original.state==='unknown'){await reconcile(env,original,now,result);return;}
   const item=await claim(env,original,now());if(!item)return;
-  let outcome:ResultState='unknown',reason:AsyncExportRetryBatchItemReason|null='result_unknown',manualId:string|null=null;
+  let outcome:ResultState='unknown',reason:RetryBatchNotificationRetryBatchItemReason|null='result_unknown',manualId:string|null=null;
   try{
     const prior=await receipt(env,item);
     if(prior){outcome='requeued';reason=null;manualId=prior.id;}

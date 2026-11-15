@@ -188,3 +188,26 @@ it('upgrades the previous schema without rebuilding retained batches or changing
     expect((await cancelAsyncExportNotificationRetryBatch(oldCtx,box.id,id,{clientRequestId:crypto.randomUUID(),expectedVersion:1})).batch).toMatchObject({id,state:'cancelled',version:3});
   }finally{await old.dispose();}
 },60_000);
+
+it('replays an identical cancel or reconciliation whose snapshot resumes only after the winning operation commits',async()=>{
+  for(const action of ['cancel','reconcile'] as const){
+    const f=await fixture(1);if(action==='reconcile')await setState(f.items[0],'unknown');const before=(await raw(f.batch.id))!,input={clientRequestId:crypto.randomUUID(),expectedVersion:before.version},count=await controlAudits();
+    let resume!:()=>void,entered!:()=>void;const blocked=new Promise<void>(resolve=>{resume=resolve;}),ready=new Promise<void>(resolve=>{entered=resolve;});
+    const paused=database(async(target,statements)=>{entered();await blocked;return target.batch(statements);}),operation=action==='cancel'?cancelAsyncExportNotificationRetryBatch:reconcileAsyncExportNotificationRetryBatch;
+    const duplicate=operation({...ctx,env:{...env,DB:paused}},f.mailbox.id,f.batch.id,input);await ready;
+    let winner;try{winner=await operation(ctx,f.mailbox.id,f.batch.id,input);}finally{resume();}
+    const replay=await duplicate;expect(winner.replayed).toBe(false);expect(replay).toMatchObject({replayed:true,operation:winner.operation,batch:winner.batch});
+    expect(await controlAudits()).toBe(count+1);expect((await raw(f.batch.id))!.version).toBe(winner.batch.version);
+  }
+},30_000);
+
+it('still rejects a different operation intent after its initially empty receipt lookup races with another commit',async()=>{
+  for(const altered of ['new_uuid','other_operation'] as const){
+    const f=await fixture(1);await setState(f.items[0],'unknown');const before=(await raw(f.batch.id))!,input={clientRequestId:crypto.randomUUID(),expectedVersion:before.version},count=await controlAudits();
+    let resume!:()=>void,entered!:()=>void;const blocked=new Promise<void>(resolve=>{resume=resolve;}),ready=new Promise<void>(resolve=>{entered=resolve;});
+    const paused=database(async(target,statements)=>{entered();await blocked;return target.batch(statements);});
+    const duplicate=cancelAsyncExportNotificationRetryBatch({...ctx,env:{...env,DB:paused}},f.mailbox.id,f.batch.id,input);const rejected=expect(duplicate).rejects.toMatchObject({code:altered==='new_uuid'?'batch_control_changed':'batch_control_conflict'});await ready;
+    let winner;try{winner=altered==='new_uuid'?await cancelAsyncExportNotificationRetryBatch(ctx,f.mailbox.id,f.batch.id,{...input,clientRequestId:crypto.randomUUID()}):await reconcileAsyncExportNotificationRetryBatch(ctx,f.mailbox.id,f.batch.id,input);}finally{resume();}
+    await rejected;expect(await controlAudits()).toBe(count+1);expect((await raw(f.batch.id))!.version).toBe(winner.batch.version);
+  }
+},30_000);

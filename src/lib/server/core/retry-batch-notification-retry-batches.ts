@@ -30,14 +30,15 @@ const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const failureReasons:readonly string[]=['all','other',...RETRY_BATCH_NOTIFICATION_FAILURE_REASONS];
 const blockReasons:readonly string[]=['not_dead','not_admitted','mailbox_inactive','endpoint_inactive','budget_exhausted','notifications_disabled','quiet_hours',
   'not_configured','payload_unavailable','signing_key_unavailable','invalid_target'];
-const itemReasons:readonly string[]=[...blockReasons,'changed','batch_expired','result_unknown','retry_failed','preview_blocked','not_found','receipt_conflict'];
+const itemReasons:readonly string[]=[...blockReasons,'changed','batch_expired','batch_cancelled','not_submitted','result_unknown','retry_failed','preview_blocked','not_found','receipt_conflict'];
 export function notificationRetryBatchDto(row:NotificationRetryBatchRow,now=Date.now(),active=true):RetryBatchNotificationRetryBatch{
   const expired=row.expires_at<=now||row.state==='preview'&&row.preview_expires_at<=now;
   return {id:row.id,mailboxId:row.mailbox_id,window:{from:row.from_ms,to:row.to_ms},filters:{reason:failureReasons.includes(row.filter_reason)?row.filter_reason:'other'},
-    state:expired&&row.state!=='completed'?'expired':row.state,version:row.version,totalItems:row.total_items,eligibleItems:row.eligible_items,processedItems:row.processed_items,
+    state:row.cancelled_at!==null?'cancelled':expired&&row.state!=='completed'?'expired':row.state,version:row.version,totalItems:row.total_items,eligibleItems:row.eligible_items,processedItems:row.processed_items,
     requeuedItems:row.requeued_items,skippedItems:row.skipped_items,failedItems:row.failed_items,unknownItems:row.unknown_items,
-    createdAt:row.created_at,updatedAt:row.updated_at,expiresAt:row.expires_at,previewExpiresAt:row.preview_expires_at,committedAt:row.committed_at,completedAt:row.completed_at,
-    canCommit:active&&row.cancelled_at==null&&!expired&&row.state==='preview'};
+    createdAt:row.created_at,updatedAt:row.updated_at,expiresAt:row.expires_at,previewExpiresAt:row.preview_expires_at,committedAt:row.committed_at,completedAt:row.completed_at,cancelledAt:row.cancelled_at,
+    canCommit:active&&row.cancelled_at==null&&!expired&&row.state==='preview',
+    canCancel:row.cancelled_at==null&&!expired&&['preview','queued','running'].includes(row.state)};
 }
 export function notificationRetryItemDto(row:NotificationRetryItemRow):RetryBatchNotificationRetryBatchItem{
   return {deliveryId:row.delivery_id,notificationId:row.notification_id,sourceBatchId:row.source_batch_id,expectedUpdatedAt:row.expected_updated_at,failureReason:failureReasons.includes(row.failure_reason)?row.failure_reason:'other',

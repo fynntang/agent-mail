@@ -174,3 +174,5 @@ Webhook endpoint 严格属于一个邮箱，只有 Owner 管理。Owner创建end
 批次通知投递追踪沿用0019快照、事件和Webhook历史表，Owner GET只读查询不解密或推进通知。新的安全重试用稳定audit UUID和原投递版本，在同一D1事务中记录收据与增加有界预算，保留原签名/载荷/目标；真实通知收据优先路由通用重试入口，原跳过决定保持不变。现有0016审计索引足够，无新增DDL。详见[投递追踪](retry-batch-notification-deliveries.md)。
 
 Owner可对批次通知失败投递保存固定预览并幂等确认，后台每轮最多5项处理；0020增加独立两表，当前56表，新任务不生成自身通知或events，避免递归重试。静态Token/OAuth/MCP权限不扩大，详见[通知失败投递批量重试](retry-batch-notification-retry-batches.md)。
+
+通知重试任务的取消和未知结果核对复用0020预留标记、执行租约和audit_events，不增加表或迁移。取消、领取与单条重排准入共享D1版本围栏；已执行结果保留，核对只读取精确原收据且事务冻结证据，不重新排队。新操作不创建事件/通知，详见[通知重试任务控制](retry-batch-notification-retry-controls.md)。

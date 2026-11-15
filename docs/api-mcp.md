@@ -120,3 +120,5 @@ Owner可读取及确认 `.../retry-batch-notifications` 的批次完成、失败
 批量任务通知支持Owner查看原决定/跳过原因、投递状态、传输尝试和手动重试收据。重新排队复用原冻结身份、当前策略及UUID/版本幂等，专用和通用Webhook入口采用相同校验；无新迁移或绑定，仍54张表。详见[批次通知投递追踪](retry-batch-notification-deliveries.md)。
 
 Owner可对批次通知失败投递保存固定预览并幂等确认，后台每轮最多5项处理；0020增加独立两表，当前56表，新任务不生成自身通知或events，避免递归重试。静态Token/OAuth/MCP权限不扩大，详见[通知失败投递批量重试](retry-batch-notification-retry-batches.md)。
+
+该通知重试任务另有 Owner 专属 `.../retry-batch-notification-retry-batches/{batchId}/cancel`、`/reconcile` 和 `/operations`。取消只停止未执行条目，未知结果按原通知/来源批次/投递收据核对；UUID与原版本固定操作意图，不发送新通知或扩大Agent权限，详见[取消、对账与历史](retry-batch-notification-retry-controls.md)。

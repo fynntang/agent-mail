@@ -51,6 +51,10 @@ async function result(ctx:OwnerContext,box:string,request:Intent,receipt:Audit,r
   if(!['active','paused'].includes(mailbox.status))throw new ServiceError('not_found',404);
   return {batch:batchRetryDto(current,Date.now(),mailbox.status==='active'),replayed,operation};
 }
+/** A matching operation may commit after the first receipt lookup but before the snapshot. */
+async function replayOrFail(ctx:OwnerContext,box:string,request:Intent,receiptId:string,code:'changed'|'unavailable'):Promise<AsyncExportRetryBatchControlResult>{
+  const accepted=await audit(ctx,receiptId);if(accepted)return result(ctx,box,request,accepted,true);return fail(code);
+}
 function auditInsert(ctx:OwnerContext,box:string,request:Intent,id:string,at:number,data:Record<string,unknown>,guard:string,args:(number|string)[]){
   return ctx.env.DB.prepare(`INSERT INTO audit_events(id,mailbox_id,actor_kind,action,resource_id,outcome,request_id,metadata_json,occurred_at)
     SELECT ?,?,'owner',?,?,'success',?,?,? WHERE EXISTS(SELECT 1 FROM async_export_notification_retry_batches b JOIN mailboxes m ON m.id=b.mailbox_id
@@ -64,8 +68,8 @@ export async function cancelAsyncExportNotificationRetryBatch(ctx:OwnerContext,b
   const snapshot=await ctx.env.DB.batch([ctx.env.DB.prepare('SELECT * FROM async_export_notification_retry_batches WHERE mailbox_id=? AND id=?').bind(box,id),
     ctx.env.DB.prepare('SELECT * FROM async_export_notification_retry_items WHERE mailbox_id=? AND batch_id=? ORDER BY delivery_id').bind(box,id)]);
   const current=snapshot[0].results[0] as unknown as BatchRetryRow|undefined;if(!current)throw new ServiceError('not_found',404);
-  if(current.version!==request.expectedVersion)return fail('changed');const at=Date.now();
-  if(!batchRetryDto(current,at).canCancel)return fail('unavailable');
+  if(current.version!==request.expectedVersion)return replayOrFail(ctx,box,request,receiptId,'changed');const at=Date.now();
+  if(!batchRetryDto(current,at).canCancel)return replayOrFail(ctx,box,request,receiptId,'unavailable');
   const items=snapshot[1].results as unknown as BatchRetryItemRow[],stopped=items.filter(item=>item.state==='pending').length,unknown=items.filter(item=>item.state==='running'||item.state==='unknown').length;
   const versions=JSON.stringify(items.map(item=>({id:item.delivery_id,version:item.version})));
   let changed=false;
@@ -89,8 +93,8 @@ export async function reconcileAsyncExportNotificationRetryBatch(ctx:OwnerContex
   if(prior)return result(ctx,box,request,prior,true);
   const snapshot=await ctx.env.DB.batch([ctx.env.DB.prepare('SELECT * FROM async_export_notification_retry_batches WHERE mailbox_id=? AND id=?').bind(box,id),
     ctx.env.DB.prepare(`SELECT * FROM async_export_notification_retry_items WHERE mailbox_id=? AND batch_id=? AND state='unknown' ${request.deliveryId?'AND delivery_id=?':''} ORDER BY delivery_id LIMIT 20`).bind(box,id,...(request.deliveryId?[request.deliveryId]:[]))]);
-  const current=snapshot[0].results[0] as unknown as BatchRetryRow|undefined;if(!current)throw new ServiceError('not_found',404);if(current.version!==request.expectedVersion)return fail('changed');
-  const items=snapshot[1].results as unknown as BatchRetryItemRow[];if(!items.length)return fail('unavailable');
+  const current=snapshot[0].results[0] as unknown as BatchRetryRow|undefined;if(!current)throw new ServiceError('not_found',404);if(current.version!==request.expectedVersion)return replayOrFail(ctx,box,request,receiptId,'changed');
+  const items=snapshot[1].results as unknown as BatchRetryItemRow[];if(!items.length)return replayOrFail(ctx,box,request,receiptId,'unavailable');
   const outcomes=await Promise.all(items.map(async item=>{
     const singleReceiptId=await stableId(`async-export-notification-retry:v1:${box}:${item.client_request_id}`);
     try{const found=await findAsyncExportNotificationRetryReceipt(ctx.env,box,item.job_id,item.delivery_id,item.client_request_id,item.expected_updated_at);

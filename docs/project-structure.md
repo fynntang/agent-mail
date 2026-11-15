@@ -42,6 +42,7 @@ src/
     async-export-notification-retry.ts Owner幂等CAS重排队、实时策略及冻结凭据校验
     async-export-notification-retry-batches.ts Owner固定候选预览、双UUID幂等确认、配额和批次/结果分页
     retry-batch-notification-retry-batches.ts 通知失败投递固定预览、幂等确认、配额与分页
+    retry-batch-notification-retry-controls.ts Owner取消未执行条目、原收据对账及分页操作历史
     retry-batch-notification-retry-jobs.ts 独立5项执行/租约恢复/收据核对，不生成递归通知
     retry-batch-notification-retry-shared.ts 新任务结果原子汇总
     retry-batch-notification-deliveries.ts Owner通知决定、投递状态/尝试/手动收据与分页

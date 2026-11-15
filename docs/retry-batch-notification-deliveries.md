@@ -67,3 +67,5 @@ POST /owner/api/mailboxes/{mailboxId}/webhook-deliveries/{deliveryId}/retry
 执行数量及验收记录见[开发记录](development.md)。本地使用模拟 Access 和接收端，不代表真实 Cloudflare 部署或投递已验收。通知事实与端点快照语义见[完成与异常通知](retry-batch-notifications.md)。
 
 Owner可对批次通知失败投递保存固定预览并幂等确认，后台每轮最多5项处理；0020增加独立两表，当前56表，新任务不生成自身通知或events，避免递归重试。静态Token/OAuth/MCP权限不扩大，详见[通知失败投递批量重试](retry-batch-notification-retry-batches.md)。
+
+通知批量重试任务还支持[停止未执行条目、未知结果对账与操作历史](retry-batch-notification-retry-controls.md)。取消不会撤回已经排队的原Webhook，核对不执行新重试或增加预算；原投递和通知身份保持不变。
