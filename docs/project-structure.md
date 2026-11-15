@@ -41,6 +41,9 @@ src/
     async-export-notification-delivery-shared.ts 严格绑定通知快照、事件与冻结投递内容
     async-export-notification-retry.ts Owner幂等CAS重排队、实时策略及冻结凭据校验
     async-export-notification-retry-batches.ts Owner固定候选预览、双UUID幂等确认、配额和批次/结果分页
+    retry-batch-notification-retry-batches.ts 通知失败投递固定预览、幂等确认、配额与分页
+    retry-batch-notification-retry-jobs.ts 独立5项执行/租约恢复/收据核对，不生成递归通知
+    retry-batch-notification-retry-shared.ts 新任务结果原子汇总
     retry-batch-notification-deliveries.ts Owner通知决定、投递状态/尝试/手动收据与分页
     retry-batch-notification-delivery-shared.ts 真实通知事件与冻结载荷/原捕获端点匹配
     retry-batch-notification-retry.ts 稳定UUID收据、原版本和当前策略下原子重新排队
@@ -110,7 +113,8 @@ migrations/0015_async_export_notifications.sql 导出终态快照、确认与准
 migrations/0016_export_notification_delivery_history.sql 既有审计的资源/动作/时间查询索引，保持51张STRICT表
 migrations/0017_export_notification_retry_batches.sql 批量重试固定预览与逐项执行结果
 migrations/0018_export_notification_retry_controls.sql 不可撤销取消标记
-migrations/0019_retry_batch_notifications.sql 批次完成与异常通知快照，当前54张STRICT表
+migrations/0019_retry_batch_notifications.sql 批次完成与异常通知快照
+migrations/0020_retry_batch_notification_retry_batches.sql 通知投递独立批量重试，当前56张STRICT表
 scripts/
   deploy.mjs / deploy/                本地/CI 资源预配、迁移和单 Worker 发布
   sync-svelte-config.mjs              从根配置派生 adapter 配置
@@ -195,3 +199,5 @@ scheduled 先恢复 R2 成功/D1 最终提交失败的 receipt，再用单条 UP
 ## 后续目录与能力
 
 发送、审批、幂等、额度、MCP、OAuth、附件、HTML 阅读/发送、Webhook 通知、服务商投递事件、退信/投诉抑制及初始化向导已实现。后续通用附件预览、线程归并、STDIO 桥接及公开 release Deploy 按钮继续遵守[架构](architecture.md)和[部署发布门槛](deployment.md)。
+
+README的标准Cloudflare按钮由scripts/deploy-entry.mjs识别WORKERS_CI=1后使用deploy-workers-builds.mjs；复用按钮已配置的D1/R2，校验、构建、迁移后只部署一个Worker。本地计划与GitHub Actions仍走原部署器。

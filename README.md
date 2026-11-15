@@ -1,5 +1,10 @@
 # Agent Mail
 
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Ffynntang%2Fagent-mail)
+[![Deploy Worker with GitHub Actions](https://img.shields.io/badge/Deploy_Worker-GitHub_Actions-2088FF?logo=githubactions&logoColor=white)](https://github.com/fynntang/agent-mail/actions/workflows/deploy.yml)
+
+Cloudflare 标准按钮用于公开仓库，自动配置 D1/R2；当前私有仓库可用 GitHub Actions 按钮。点击前请阅读[按钮部署步骤](docs/deployment.md#部署按钮)，填写账户、邮件域名及 Owner 邮箱；Access、邮件路由和发送服务通过部署后的向导配置。
+
 面向个人自部署的 Agent 邮箱服务：一个 Cloudflare 账户中运行一个实例，管理多个独立邮箱，为不同 Agent 签发严格绑定邮箱的 Token，逐步提供 API / MCP 收发邮件能力。
 
 技术栈为 SvelteKit + TypeScript + Cloudflare Workers + D1（SQLite）+ 私有 R2。保持单 Worker：SvelteKit处理HTTP，自定义入口同时处理email、scheduled和可选queue。个人控制台由Cloudflare Access保护，无需中心化账号、租户、订阅计费或必需的LLM服务。
@@ -62,7 +67,9 @@ Owner 可在导出通知详情追踪原通知决定、跳过原因、发布进�
 
 批量任务支持完成、失败及待对账提醒，Owner 可确认、查看快照及定位原任务，邮箱级 Webhook 沿用通知策略、签名和自动重试。应用0019后共54张表，详见[批次完成与异常通知](docs/retry-batch-notifications.md)。
 
-OAuth 客户端可通过发现、动态注册、PKCE 和 Owner 授权页连接，Owner 选择单个邮箱与权限并可撤销访问。已有实例需按序应用待迁移文件（当前最新 `0019_retry_batch_notifications.sql`），静态 Token 保持可用且不会自动获得收件附件下载权限。详见[OAuth 接入与部署](docs/oauth.md)。
+批次通知的失败投递可按当前邮箱、时间及安全原因冻结预览，明确确认后由后台每轮最多5项重新排队，保留幂等进度和逐条结果。独立任务表不再生成自身通知，避免递归重试；应用0020后共56张表，详见[通知失败投递批量重试](docs/retry-batch-notification-retry-batches.md)。
+
+OAuth 客户端可通过发现、动态注册、PKCE 和 Owner 授权页连接，Owner 选择单个邮箱与权限并可撤销访问。已有实例需按序应用待迁移文件（当前最新 `0020_retry_batch_notification_retry_batches.sql`），静态 Token 保持可用且不会自动获得收件附件下载权限。详见[OAuth 接入与部署](docs/oauth.md)。
 
 ```sh
 pnpm check
@@ -99,7 +106,7 @@ node scripts/validate-svelte-config.mjs
 
 Email Sending 当前为 Beta，限定事务性邮件；向任意收件人发送需要 Workers Paid。应用保留可替换的发送适配器。[官方服务说明](https://developers.cloudflare.com/email-service/)、[适用范围](https://developers.cloudflare.com/email-service/reference/faq/)。
 
-部署工具已通过本地模拟测试；尚未执行真实 Cloudflare 账户安装或发布公开 release。发布可部署版本前需完成云端验收，再添加指向固定 release 的 Deploy to Cloudflare 按钮。
+部署工具及按钮入口已通过本地模拟验证；尚未执行真实 Cloudflare 账户安装或发布公开 release。标准按钮指向本仓库，依赖仓库公开可访问；生产安装建议在克隆后固定已审阅的提交或 release。
 
 唯一部署入口为 `worker/entry.ts`，adapter 只读取生成的 `wrangler.svelte.jsonc`。三个原生 handler 使用同一份最终 bundle。根配置含 `EMAIL` 发送绑定；本地使用模拟发送，真实发送需在自己的账户开通 Email Sending 并验证域名。
 

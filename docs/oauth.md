@@ -12,7 +12,7 @@
 
 新增 [0002_oauth.sql](../migrations/0002_oauth.sql)，在原有22张表之上增加7张 OAuth 表。已有实例按顺序应用新迁移，不重新执行初始快照，不覆盖邮件、邮箱或 Token。
 
-当前还需按序应用后续迁移，最新为 [0019_retry_batch_notifications.sql](../migrations/0019_retry_batch_notifications.sql)，当前为54张表。0017新增批量重试两表，0018只增加取消标记及约束，不新增表。收件附件授权 `attachments:read` 必须同时有 `mail:read`，Owner 明确同意后才能读取字节。自己的草稿文件沿用 mail:draft，可分块上传并随已审批草稿发送，详见[草稿附件](outbound-attachments.md)。旧授权不自动扩大；刷新可以缩减范围且不能重新扩大。OAuth AT 仍只用于 `/mcp`，通过工具直接读写字节，见[附件说明](attachments.md)。抑制操作告警、通知策略、决策记录与统计以及[导出完成/失败通知](async-export-notifications.md)属于 Owner 运维信息，不开放给 OAuth 客户端；两个导出 Webhook 类型、事件及投递记录也保持隔离。
+当前还需按序应用后续迁移，最新为 [0020_retry_batch_notification_retry_batches.sql](../migrations/0020_retry_batch_notification_retry_batches.sql)，当前为56张表。0017新增批量重试两表，0018只增加取消标记及约束，不新增表。收件附件授权 `attachments:read` 必须同时有 `mail:read`，Owner 明确同意后才能读取字节。自己的草稿文件沿用 mail:draft，可分块上传并随已审批草稿发送，详见[草稿附件](outbound-attachments.md)。旧授权不自动扩大；刷新可以缩减范围且不能重新扩大。OAuth AT 仍只用于 `/mcp`，通过工具直接读写字节，见[附件说明](attachments.md)。抑制操作告警、通知策略、决策记录与统计以及[导出完成/失败通知](async-export-notifications.md)属于 Owner 运维信息，不开放给 OAuth 客户端；两个导出 Webhook 类型、事件及投递记录也保持隔离。
 
 ```sh
 pnpm install --frozen-lockfile

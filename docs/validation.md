@@ -1,6 +1,6 @@
 # 个人版数据库结构验证
 
-验证环境：Node.js v24.22.1，内置SQLite 3.53.4。在全新内存数据库中按序加载54张STRICT表，完成224项检查。
+验证环境：Node.js v24.22.1，内置SQLite 3.53.4。在全新内存数据库中按序加载56张STRICT表，完成233项检查。
 
 没有连接Cloudflare或生产数据库，没有部署应用、修改DNS或实际收发邮件。当前验证为SQLite语法、关系约束与本地事务行为，不能视为D1云端、Worker绑定或实际API/MCP验收。
 
@@ -13,11 +13,11 @@ node scripts/validate-schema.mjs
 node scripts/validate-schema.mjs --dictionary
 ```
 
-[验证脚本](../scripts/validate-schema.mjs)按序加载0001至0019有序迁移，最新为[批次完成与异常通知迁移](../migrations/0019_retry_batch_notifications.sql)，检查合并内容与[快照](schema.sql)一致。--dictionary从实际SQLite元数据重建[快照](schema.sql)、[字段字典](database.md)并更新本记录。每次使用内存数据库，不保留测试数据。
+[验证脚本](../scripts/validate-schema.mjs)按序加载0001至0020有序迁移，最新为[通知失败投递批量重试迁移](../migrations/0020_retry_batch_notification_retry_batches.sql)，检查合并内容与[快照](schema.sql)一致。--dictionary从实际SQLite元数据重建[快照](schema.sql)、[字段字典](database.md)并更新本记录。每次使用内存数据库，不保留测试数据。
 
 ## 已通过检查
 
-1. 54张个人版表加载，全部STRICT
+1. 56张个人版表加载，全部STRICT
 2. 不包含租户、订阅或引擎账户表
 3. 外键检查已启用
 4. 实例设置只能有一个Owner实例行
@@ -238,9 +238,18 @@ node scripts/validate-schema.mjs --dictionary
 219. 通知确认不可撤销
 220. 批次通知确认不会更改执行结果
 221. 0019升级不回填旧终态或修改旧批次结果
-222. 最终foreign_key_check与integrity_check通过
-223. 配置示例保留DB/R2/EMAIL绑定
-224. 当前文档本地链接有效
+222. 通知投递批量预览标识在邮箱内唯一
+223. 通知投递批量固定候选与范围不可改写
+224. 通知投递批量未经确认不得执行
+225. 通知条目不能把通知指向错误来源批次
+226. 通知投递条目原版本不可改写
+227. 通知投递批量任务完成不递归生成通知或事件
+228. 通知投递批量任务历史不可删除
+229. 通知投递批量条目已执行结果不可重置
+230. 0020升级保留原通知和批次且不补造重试任务
+231. 最终foreign_key_check与integrity_check通过
+232. 配置示例保留DB/R2/EMAIL绑定
+233. 当前文档本地链接有效
 
 ## 验证边界
 

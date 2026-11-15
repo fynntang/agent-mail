@@ -33,7 +33,7 @@ function bucket(overrides:Record<string,unknown>) {
 }
 
 it('reads all migration health without initializing an instance, writing blobs, or sending mail',async()=>{
-  const value=await getSetup(ctx);expect(value.resources).toMatchObject({d1:'migrated',r2:'connected',schemaVersion:'0019_retry_batch_notifications.sql',missingTables:[],missingIndexes:[]});
+  const value=await getSetup(ctx);expect(value.resources).toMatchObject({d1:'migrated',r2:'connected',schemaVersion:'0020_retry_batch_notification_retry_batches.sql',missingTables:[],missingIndexes:[]});
   expect(value.configValid).toBe(true);expect(value.instance).toMatchObject({id:null,state:'pending',updatedAt:null});
   expect(value.canComplete).toBe(false);expect(value.evidence.activeMailboxCount).toBe(0);
   await getSetup(ctx);expect(await count('instance_settings')).toBe(0);expect(await count('audit_events')).toBe(0);
@@ -140,6 +140,17 @@ it('requires the frozen subscription fence for retry batch notifications',async(
   await ctx.env.DB.prepare('ALTER TABLE async_export_retry_batch_notifications RENAME COLUMN endpoint_snapshot_json TO removed_snapshot').run();
   const value=await getSetup(ctx);expect(value.resources).toMatchObject({d1:'migration_required',schemaVersion:'0018_export_notification_retry_controls.sql',missingTables:['async_export_retry_batch_notifications']});
   await expect(updateSetup(ctx,input(null))).rejects.toMatchObject({code:'setup_migration_required'});
+});
+
+it('reports the notification schema when notice retry execution storage is missing',async()=>{
+  await ctx.env.DB.prepare('DROP TABLE retry_batch_notification_retry_items').run();
+  const value=await getSetup(ctx);expect(value.resources).toMatchObject({d1:'migration_required',schemaVersion:'0019_retry_batch_notifications.sql',missingTables:['retry_batch_notification_retry_items']});
+  await expect(updateSetup(ctx,input(null))).rejects.toMatchObject({code:'setup_migration_required'});
+});
+
+it('requires the notice target composite index before enabling bulk notification retries',async()=>{
+  await ctx.env.DB.prepare('DROP INDEX retry_batch_notifications_target').run();
+  const value=await getSetup(ctx);expect(value.resources).toMatchObject({d1:'migration_required',schemaVersion:'0019_retry_batch_notifications.sql',missingIndexes:['retry_batch_notifications_target']});
 });
 
 it('reports the prior delivery migration when the suppression table has not been applied',async()=>{

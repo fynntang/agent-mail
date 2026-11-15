@@ -1,6 +1,6 @@
 # 个人版 D1 数据库字段与约束
 
-由 migrations/ 中按序迁移在本地SQLite加载后提取，共54张STRICT表；当前迁移为 0001_initial.sql、0002_oauth.sql、0003_setup.sql、0004_attachments.sql、0005_draft_attachments.sql、0006_webhooks.sql、0007_email_delivery_events.sql、0008_recipient_suppressions.sql、0009_cloudflare_suppressions.sql、0010_cloudflare_suppression_history.sql、0011_cloudflare_suppression_alerts.sql、0012_alert_notification_policies.sql、0013_alert_notification_decision_indexes.sql、0014_async_alert_notification_exports.sql、0015_async_export_notifications.sql、0016_export_notification_delivery_history.sql、0017_export_notification_retry_batches.sql、0018_export_notification_retry_controls.sql、0019_retry_batch_notifications.sql。不存在tenant、订阅、PostgreSQL RLS或Stalwart映射。D1仅保存小元数据，原始MIME、正文、附件和冻结快照位于私有R2。业务资源ID为UUID TEXT，OAuth client_id为UUID或HTTPS元数据URL；时间为UTC毫秒INTEGER，布尔为0/1。
+由 migrations/ 中按序迁移在本地SQLite加载后提取，共56张STRICT表；当前迁移为 0001_initial.sql、0002_oauth.sql、0003_setup.sql、0004_attachments.sql、0005_draft_attachments.sql、0006_webhooks.sql、0007_email_delivery_events.sql、0008_recipient_suppressions.sql、0009_cloudflare_suppressions.sql、0010_cloudflare_suppression_history.sql、0011_cloudflare_suppression_alerts.sql、0012_alert_notification_policies.sql、0013_alert_notification_decision_indexes.sql、0014_async_alert_notification_exports.sql、0015_async_export_notifications.sql、0016_export_notification_delivery_history.sql、0017_export_notification_retry_batches.sql、0018_export_notification_retry_controls.sql、0019_retry_batch_notifications.sql、0020_retry_batch_notification_retry_batches.sql。不存在tenant、订阅、PostgreSQL RLS或Stalwart映射。D1仅保存小元数据，原始MIME、正文、附件和冻结快照位于私有R2。业务资源ID为UUID TEXT，OAuth client_id为UUID或HTTPS元数据URL；时间为UTC毫秒INTEGER，布尔为0/1。
 
 一个Token只能绑定一个邮箱。数据库复合外键保障关联完整性，API/MCP仍须逐请求执行邮箱权限。Owner只有一位，由部署配置和Access JWT确定。
 
@@ -74,6 +74,8 @@ erDiagram
 | outbound_messages | 冻结发送命令与服务商接受状态 |
 | outbound_recipients | 逐收件人投递状态 |
 | recipient_suppressions | 按邮箱隔离的永久退信/投诉抑制与Owner解除水位 |
+| retry_batch_notification_retry_batches | 批次通知失败投递的独立固定预览、双UUID确认和有界执行进度，不递归生成通知 |
+| retry_batch_notification_retry_items | 绑定原通知/来源批次/投递版本的不可变候选、租约及安全重试收据与结果 |
 | send_attempts | 服务商提交尝试与unknown |
 | send_reservations | trigger维护的额度预留 |
 | threads | 邮箱内会话 |
@@ -679,6 +681,7 @@ CREATE TABLE async_export_retry_batch_notifications (
 ```sql
 CREATE INDEX retry_batch_notifications_mailbox ON async_export_retry_batch_notifications(mailbox_id,created_at DESC,id DESC);
 CREATE INDEX retry_batch_notifications_project ON async_export_retry_batch_notifications(projected_at,created_at,id);
+CREATE UNIQUE INDEX retry_batch_notifications_target ON async_export_retry_batch_notifications(mailbox_id,id,batch_id);
 CREATE INDEX retry_batch_notifications_unread ON async_export_retry_batch_notifications(mailbox_id,acknowledged_at,created_at DESC,id DESC);
 CREATE TRIGGER retry_batch_notification_identity BEFORE UPDATE ON async_export_retry_batch_notifications
  WHEN NEW.id IS NOT OLD.id OR NEW.mailbox_id IS NOT OLD.mailbox_id OR NEW.batch_id IS NOT OLD.batch_id
@@ -2241,6 +2244,156 @@ CREATE TRIGGER recipient_suppression_identity BEFORE UPDATE ON recipient_suppres
  OR NEW.version<=OLD.version OR NEW.updated_at<OLD.updated_at OR NEW.last_event_at<OLD.last_event_at OR NEW.release_watermark<OLD.release_watermark
  OR(OLD.reason='complaint' AND NEW.reason<>'complaint')
  BEGIN SELECT RAISE(ABORT,'recipient suppression identity is immutable'); END;
+```
+
+## retry_batch_notification_retry_batches
+
+批次通知失败投递的独立固定预览、双UUID确认和有界执行进度，不递归生成通知。
+
+| 字段 | 类型 | 非空 | 默认值 | 主键 |
+| --- | --- | --- | --- | --- |
+| id | TEXT | 是 | — | 是 |
+| mailbox_id | TEXT | 是 | — | 否 |
+| preview_request_id | TEXT | 是 | — | 否 |
+| request_hash | TEXT | 是 | — | 否 |
+| from_ms | INTEGER | 是 | — | 否 |
+| to_ms | INTEGER | 是 | — | 否 |
+| filter_reason | TEXT | 是 | — | 否 |
+| state | TEXT | 是 | 'preview' | 否 |
+| version | INTEGER | 是 | 1 | 否 |
+| created_at | INTEGER | 是 | — | 否 |
+| updated_at | INTEGER | 是 | — | 否 |
+| expires_at | INTEGER | 是 | — | 否 |
+| preview_expires_at | INTEGER | 是 | — | 否 |
+| commit_request_id | TEXT | 否 | — | 否 |
+| commit_expected_version | INTEGER | 否 | — | 否 |
+| committed_at | INTEGER | 否 | — | 否 |
+| completed_at | INTEGER | 否 | — | 否 |
+| cancelled_at | INTEGER | 否 | — | 否 |
+| total_items | INTEGER | 是 | — | 否 |
+| eligible_items | INTEGER | 是 | — | 否 |
+| processed_items | INTEGER | 是 | 0 | 否 |
+| requeued_items | INTEGER | 是 | 0 | 否 |
+| skipped_items | INTEGER | 是 | 0 | 否 |
+| failed_items | INTEGER | 是 | 0 | 否 |
+| unknown_items | INTEGER | 是 | 0 | 否 |
+
+完整表约束：
+
+```sql
+CREATE TABLE retry_batch_notification_retry_batches (
+ id TEXT PRIMARY KEY NOT NULL,mailbox_id TEXT NOT NULL REFERENCES mailboxes(id),
+ preview_request_id TEXT NOT NULL,request_hash TEXT NOT NULL CHECK(length(request_hash)=64),
+ from_ms INTEGER NOT NULL CHECK(from_ms>=0),to_ms INTEGER NOT NULL CHECK(to_ms>from_ms AND to_ms-from_ms<=2678400000),
+ filter_reason TEXT NOT NULL CHECK(length(filter_reason) BETWEEN 1 AND 80),
+ state TEXT NOT NULL DEFAULT 'preview' CHECK(state IN('preview','queued','running','completed','expired')),
+ version INTEGER NOT NULL DEFAULT 1 CHECK(version>0),
+ created_at INTEGER NOT NULL CHECK(created_at>=0),updated_at INTEGER NOT NULL CHECK(updated_at>=created_at),
+ expires_at INTEGER NOT NULL CHECK(expires_at>created_at),preview_expires_at INTEGER NOT NULL CHECK(preview_expires_at>created_at AND preview_expires_at<=expires_at),
+ commit_request_id TEXT,commit_expected_version INTEGER CHECK(commit_expected_version IS NULL OR commit_expected_version>0),
+ committed_at INTEGER,completed_at INTEGER,cancelled_at INTEGER CHECK(cancelled_at IS NULL OR cancelled_at>=0),
+ total_items INTEGER NOT NULL CHECK(total_items BETWEEN 0 AND 1000),eligible_items INTEGER NOT NULL CHECK(eligible_items BETWEEN 0 AND total_items),
+ processed_items INTEGER NOT NULL DEFAULT 0 CHECK(processed_items BETWEEN 0 AND total_items),
+ requeued_items INTEGER NOT NULL DEFAULT 0 CHECK(requeued_items>=0),skipped_items INTEGER NOT NULL DEFAULT 0 CHECK(skipped_items>=0),
+ failed_items INTEGER NOT NULL DEFAULT 0 CHECK(failed_items>=0),unknown_items INTEGER NOT NULL DEFAULT 0 CHECK(unknown_items>=0),
+ UNIQUE(mailbox_id,id),UNIQUE(mailbox_id,preview_request_id),UNIQUE(mailbox_id,commit_request_id),
+ CHECK(processed_items=requeued_items+skipped_items+failed_items+unknown_items),
+ CHECK((commit_request_id IS NULL AND commit_expected_version IS NULL AND committed_at IS NULL)
+   OR(commit_request_id IS NOT NULL AND commit_expected_version IS NOT NULL AND committed_at IS NOT NULL)),
+ CHECK(state NOT IN('queued','running','completed') OR committed_at IS NOT NULL),
+ CHECK(state<>'completed' OR(processed_items=total_items AND unknown_items=0 AND completed_at IS NOT NULL))
+) STRICT;
+```
+
+索引与触发器：
+
+```sql
+CREATE INDEX notice_retry_batch_claim ON retry_batch_notification_retry_batches(state,updated_at,id);
+CREATE INDEX notice_retry_batch_mailbox ON retry_batch_notification_retry_batches(mailbox_id,created_at DESC,id DESC);
+CREATE TRIGGER notice_retry_batch_cancel_immutable BEFORE UPDATE OF cancelled_at ON retry_batch_notification_retry_batches
+ WHEN OLD.cancelled_at IS NOT NULL AND NEW.cancelled_at IS NOT OLD.cancelled_at
+ BEGIN SELECT RAISE(ABORT,'Notice retry cancellation marker is immutable'); END;
+CREATE TRIGGER notice_retry_batch_identity BEFORE UPDATE ON retry_batch_notification_retry_batches
+ WHEN NEW.id IS NOT OLD.id OR NEW.mailbox_id IS NOT OLD.mailbox_id OR NEW.preview_request_id IS NOT OLD.preview_request_id OR NEW.request_hash IS NOT OLD.request_hash
+ OR NEW.from_ms IS NOT OLD.from_ms OR NEW.to_ms IS NOT OLD.to_ms OR NEW.filter_reason IS NOT OLD.filter_reason
+ OR NEW.total_items IS NOT OLD.total_items OR NEW.eligible_items IS NOT OLD.eligible_items OR NEW.created_at IS NOT OLD.created_at
+ OR NEW.expires_at IS NOT OLD.expires_at OR NEW.preview_expires_at IS NOT OLD.preview_expires_at OR NEW.version<>OLD.version+1 OR NEW.updated_at<=OLD.updated_at
+ OR NEW.processed_items<OLD.processed_items
+ OR(OLD.commit_request_id IS NOT NULL AND(NEW.commit_request_id IS NOT OLD.commit_request_id OR NEW.commit_expected_version IS NOT OLD.commit_expected_version OR NEW.committed_at IS NOT OLD.committed_at))
+ OR(OLD.state='preview' AND NEW.state NOT IN('preview','queued','expired'))
+ OR(OLD.state='queued' AND NEW.state NOT IN('queued','running','completed','expired'))
+ OR(OLD.state='running' AND NEW.state NOT IN('running','completed','expired'))
+ OR(OLD.state='completed' AND NEW.state<>'completed') OR(OLD.state='expired' AND NEW.state<>'expired')
+ BEGIN SELECT RAISE(ABORT,'Batch retry identity/selection is immutable'); END;
+CREATE TRIGGER notice_retry_batch_retained BEFORE DELETE ON retry_batch_notification_retry_batches
+ BEGIN SELECT RAISE(ABORT,'Batch retry history is retained'); END;
+```
+
+## retry_batch_notification_retry_items
+
+绑定原通知/来源批次/投递版本的不可变候选、租约及安全重试收据与结果。
+
+| 字段 | 类型 | 非空 | 默认值 | 主键 |
+| --- | --- | --- | --- | --- |
+| batch_id | TEXT | 是 | — | 是 |
+| mailbox_id | TEXT | 是 | — | 否 |
+| delivery_id | TEXT | 是 | — | 是 |
+| notification_id | TEXT | 是 | — | 否 |
+| source_batch_id | TEXT | 是 | — | 否 |
+| expected_updated_at | INTEGER | 是 | — | 否 |
+| failure_reason | TEXT | 是 | — | 否 |
+| failed_at | INTEGER | 是 | — | 否 |
+| preview_eligible | INTEGER | 是 | — | 否 |
+| preview_reason | TEXT | 否 | — | 否 |
+| state | TEXT | 是 | 'pending' | 否 |
+| client_request_id | TEXT | 是 | — | 否 |
+| reason | TEXT | 否 | — | 否 |
+| manual_retry_id | TEXT | 否 | — | 否 |
+| created_at | INTEGER | 是 | — | 否 |
+| updated_at | INTEGER | 是 | — | 否 |
+| completed_at | INTEGER | 否 | — | 否 |
+| lease_token | TEXT | 否 | — | 否 |
+| lease_until | INTEGER | 否 | — | 否 |
+| version | INTEGER | 是 | 1 | 否 |
+
+完整表约束：
+
+```sql
+CREATE TABLE retry_batch_notification_retry_items (
+ batch_id TEXT NOT NULL,mailbox_id TEXT NOT NULL,delivery_id TEXT NOT NULL,notification_id TEXT NOT NULL,source_batch_id TEXT NOT NULL,
+ expected_updated_at INTEGER NOT NULL CHECK(expected_updated_at>=0),failure_reason TEXT NOT NULL CHECK(length(failure_reason) BETWEEN 1 AND 80),failed_at INTEGER NOT NULL CHECK(failed_at>=0),
+ preview_eligible INTEGER NOT NULL CHECK(preview_eligible IN(0,1)),preview_reason TEXT CHECK(preview_reason IS NULL OR length(preview_reason)<=80),
+ state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN('pending','running','requeued','skipped','failed','unknown')),
+ client_request_id TEXT NOT NULL UNIQUE,reason TEXT CHECK(reason IS NULL OR length(reason)<=80),manual_retry_id TEXT REFERENCES audit_events(id),
+ created_at INTEGER NOT NULL CHECK(created_at>=0),updated_at INTEGER NOT NULL CHECK(updated_at>=created_at),completed_at INTEGER,
+ lease_token TEXT,lease_until INTEGER,version INTEGER NOT NULL DEFAULT 1 CHECK(version>0),
+ PRIMARY KEY(batch_id,delivery_id),
+ FOREIGN KEY(mailbox_id,batch_id) REFERENCES retry_batch_notification_retry_batches(mailbox_id,id),
+ FOREIGN KEY(mailbox_id,delivery_id) REFERENCES webhook_deliveries(mailbox_id,id),
+ FOREIGN KEY(mailbox_id,notification_id,source_batch_id) REFERENCES async_export_retry_batch_notifications(mailbox_id,id,batch_id),
+ CHECK((preview_eligible=1 AND preview_reason IS NULL) OR(preview_eligible=0 AND preview_reason IS NOT NULL)),
+ CHECK((state='running' AND lease_token IS NOT NULL AND lease_until IS NOT NULL) OR(state<>'running' AND lease_token IS NULL AND lease_until IS NULL)),
+ CHECK(state NOT IN('requeued','skipped','failed','unknown') OR completed_at IS NOT NULL)
+) STRICT;
+```
+
+索引与触发器：
+
+```sql
+CREATE INDEX notice_retry_item_batch ON retry_batch_notification_retry_items(batch_id,delivery_id);
+CREATE INDEX notice_retry_item_claim ON retry_batch_notification_retry_items(state,updated_at,batch_id,delivery_id);
+CREATE TRIGGER notice_retry_item_identity BEFORE UPDATE ON retry_batch_notification_retry_items
+ WHEN NEW.batch_id IS NOT OLD.batch_id OR NEW.mailbox_id IS NOT OLD.mailbox_id OR NEW.delivery_id IS NOT OLD.delivery_id OR NEW.notification_id IS NOT OLD.notification_id OR NEW.source_batch_id IS NOT OLD.source_batch_id
+ OR NEW.expected_updated_at IS NOT OLD.expected_updated_at OR NEW.failure_reason IS NOT OLD.failure_reason OR NEW.failed_at IS NOT OLD.failed_at
+ OR NEW.preview_eligible IS NOT OLD.preview_eligible OR NEW.preview_reason IS NOT OLD.preview_reason OR NEW.client_request_id IS NOT OLD.client_request_id OR NEW.created_at IS NOT OLD.created_at
+ OR NEW.version<>OLD.version+1 OR NEW.updated_at<=OLD.updated_at
+ OR(OLD.manual_retry_id IS NOT NULL AND NEW.manual_retry_id IS NOT OLD.manual_retry_id)
+ OR(OLD.state IN('requeued','skipped','failed') AND NEW.state<>OLD.state)
+ OR(OLD.state='unknown' AND NEW.state NOT IN('unknown','requeued','skipped','failed'))
+ OR(OLD.state='running' AND NEW.state='pending')
+ BEGIN SELECT RAISE(ABORT,'Batch retry item selection/result is immutable'); END;
+CREATE TRIGGER notice_retry_item_retained BEFORE DELETE ON retry_batch_notification_retry_items
+ BEGIN SELECT RAISE(ABORT,'Batch retry item history is retained'); END;
 ```
 
 ## send_attempts

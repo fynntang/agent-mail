@@ -25,7 +25,7 @@ pnpm exec wrangler secret put EMAIL_SUPPRESSIONS_API_TOKEN --config wrangler.jso
 
 在提示处粘贴 Token，不放到命令参数、普通 vars、部署 JSON、D1、R2、源码、Owner 表单、日志或浏览器存储。应用不会提供读取或回显凭据的端点。轮换时用相同命令覆盖 Secret，再手动同步验证新权限。Secret 与部署 Token、邮箱 Token、OAuth 凭据、Webhook 密钥分别管理。
 
-本地测试可在已被 gitignore 排除的 `.dev.vars` 配置同名字段；其中是真实本地明文文件，应由部署者私下保存。`.dev.vars.example` 只有空值占位。缺少三项中的任意一项或格式无效时功能关闭，既有收发与本地抑制仍可工作。部署工具拒绝把 Token 写到普通 vars，并从 check/build/migrate/upload 子进程环境中移除该运行时凭据；输出也有脱敏处理。
+本地测试可在已被 gitignore 排除的 `.dev.vars` 配置同名字段；其中是真实本地明文文件，应由部署者私下保存。`.dev.vars.local.example` 只有空值占位。缺少三项中的任意一项或格式无效时功能关闭，既有收发与本地抑制仍可工作。部署工具拒绝把 Token 写到普通 vars，并从 check/build/migrate/upload 子进程环境中移除该运行时凭据；输出也有脱敏处理。
 
 ## 同步行为与发送联动
 

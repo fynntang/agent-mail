@@ -172,3 +172,5 @@ Webhook endpoint 严格属于一个邮箱，只有 Owner 管理。Owner创建end
 0019在批次结果更新事务内捕获完成、失败和待对账通知快照，共54张表；基于结果转变去重并保留新的未知异常episode。快照和当前批次状态分别展示，Owner确认不改变执行结果。稳定outbox事件通过同一scheduled有界投影，外部通知复用邮箱策略及HMAC传输，限频指纹与原导出/Cloudflare抑制通知隔离。详见[批次完成与异常通知](retry-batch-notifications.md)。
 
 批次通知投递追踪沿用0019快照、事件和Webhook历史表，Owner GET只读查询不解密或推进通知。新的安全重试用稳定audit UUID和原投递版本，在同一D1事务中记录收据与增加有界预算，保留原签名/载荷/目标；真实通知收据优先路由通用重试入口，原跳过决定保持不变。现有0016审计索引足够，无新增DDL。详见[投递追踪](retry-batch-notification-deliveries.md)。
+
+Owner可对批次通知失败投递保存固定预览并幂等确认，后台每轮最多5项处理；0020增加独立两表，当前56表，新任务不生成自身通知或events，避免递归重试。静态Token/OAuth/MCP权限不扩大，详见[通知失败投递批量重试](retry-batch-notification-retry-batches.md)。

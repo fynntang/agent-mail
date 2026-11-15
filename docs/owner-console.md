@@ -56,6 +56,6 @@ E2E 在 `http://127.0.0.1:4193` 启动临时本地 workerd，生成独立 RSA �
 
 Windows 测试自动使用已安装的 Chrome，缺失时使用 Edge。其他环境可执行 `pnpm exec playwright install chromium`，或用 PLAYWRIGHT_CHANNEL 选择浏览器。端口占用时通过 OWNER_E2E_PORT 设置其他端口；OWNER_QA_DIR 可指定截图目录，默认在操作系统临时目录，不写入仓库。
 
-`pnpm preview` 继续使用真实认证规则与本地持久 D1/R2。可参考 `.dev.vars.example` 配置真实 Access 参数；浏览器直接访问未经 Access 处理的 localhost，不会自动获得有效身份。自动化浏览器验证通过测试请求上下文提供签名 JWT，不把测试身份注入生产应用。
+`pnpm preview` 继续使用真实认证规则与本地持久 D1/R2。可参考 `.dev.vars.local.example` 配置真实 Access 参数；浏览器直接访问未经 Access 处理的 localhost，不会自动获得有效身份。自动化浏览器验证通过测试请求上下文提供签名 JWT，不把测试身份注入生产应用。
 
 本轮已验证桌面 1488×1056、手机 390×844：创建三邮箱、设置持久化、一次性 Token、撤销、暂停/恢复、退役与会话失效；没有相关 console/page 错误。真实 Cloudflare Access 登录、云端资源、域名、DNS 和远程部署仍需部署者配置后验收。

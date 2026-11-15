@@ -8,6 +8,7 @@ import {runAsyncAlertNotificationExportJobs} from '../../src/lib/server/core/asy
 import {projectAsyncExportNotifications} from '../../src/lib/server/core/async-export-notifications';
 import {runAsyncExportNotificationRetryBatchJobs} from '../../src/lib/server/core/async-export-notification-retry-batch-jobs';
 import {projectRetryBatchNotifications} from '../../src/lib/server/core/retry-batch-notifications';
+import {runRetryBatchNotificationRetryJobs} from '../../src/lib/server/core/retry-batch-notification-retry-jobs';
 import type { RuntimeEnv } from '../../src/lib/server/core/types';
 
 export async function handleScheduled(_controller: ScheduledController, env: RuntimeEnv): Promise<void> {
@@ -23,6 +24,9 @@ export async function handleScheduled(_controller: ScheduledController, env: Run
   let batchRetries={batchRetryProcessed:0,batchRetryRequeued:0,batchRetrySkipped:0,batchRetryFailed:0,batchRetryUnknown:0,batchRetryReconciled:0};
   try{batchRetries=await runAsyncExportNotificationRetryBatchJobs(env);}
   catch{console.error(JSON.stringify({event:'export_notification_retry_batches_unavailable'}));}
+  let noticeBatchRetries={noticeBatchRetryProcessed:0,noticeBatchRetryRequeued:0,noticeBatchRetrySkipped:0,noticeBatchRetryFailed:0,noticeBatchRetryUnknown:0,noticeBatchRetryReconciled:0};
+  try{noticeBatchRetries=await runRetryBatchNotificationRetryJobs(env);}
+  catch{console.error(JSON.stringify({event:'retry_batch_notification_retries_unavailable'}));}
   let retryBatchNotifications={retryBatchNotificationsProjected:0};
   try{retryBatchNotifications=await projectRetryBatchNotifications(env);}
   catch{console.error(JSON.stringify({event:'retry_batch_notifications_unavailable'}));}
@@ -35,5 +39,5 @@ export async function handleScheduled(_controller: ScheduledController, env: Run
   console.info(JSON.stringify({event:'scheduled_completed',...result,...sends,...providerSuppressions,...alerts,
     deliveryEventsApplied:priorDeliveries.deliveryEventsApplied+deliveries.deliveryEventsApplied,
     deliveryEventsIgnored:priorDeliveries.deliveryEventsIgnored+deliveries.deliveryEventsIgnored,
-    deliveryEventsPending:priorDeliveries.deliveryEventsPending+deliveries.deliveryEventsPending,...webhooks,...batchRetries,...retryBatchNotifications,...exports,...exportNotifications}));
+    deliveryEventsPending:priorDeliveries.deliveryEventsPending+deliveries.deliveryEventsPending,...webhooks,...batchRetries,...noticeBatchRetries,...retryBatchNotifications,...exports,...exportNotifications}));
 }

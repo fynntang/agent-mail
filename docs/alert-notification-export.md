@@ -2,7 +2,7 @@
 
 Owner 在“抑制名单 → 通知决策与降噪”展开记录后，可同步下载 CSV 或 JSON。导出复用当前已应用的时间范围、决策原因和通知类型，包含全部匹配记录、降噪统计及每个订阅的 Webhook 投递结果，不受当前页大小或页码限制。本文描述同步接口；大批量数据可在同页创建[异步导出任务](async-alert-notification-export.md)，查看进度、取消及下载。
 
-同步导出保留既有语义，复用0013索引，不创建后台任务，仅查询 D1，不写入审计或限频、不推进通知发布、不访问 Cloudflare、不重新发送 Webhook。当前完整应用最新迁移为 `0019_retry_batch_notifications.sql`、共54张表；0017新增批量重试两表，0018只增加取消标记及约束。异步任务及其成败通知使用同一 Worker 的 scheduled 和私有 R2，不改变本文同步格式及上限。通知批次的[取消与未知结果对账](async-export-notification-retry-controls.md)也不改写导出内容或延长文件有效期。
+同步导出保留既有语义，复用0013索引，不创建后台任务，仅查询 D1，不写入审计或限频、不推进通知发布、不访问 Cloudflare、不重新发送 Webhook。当前完整应用最新迁移为 `0020_retry_batch_notification_retry_batches.sql`、共56张表；0017新增批量重试两表，0018只增加取消标记及约束。异步任务及其成败通知使用同一 Worker 的 scheduled 和私有 R2，不改变本文同步格式及上限。通知批次的[取消与未知结果对账](async-export-notification-retry-controls.md)也不改写导出内容或延长文件有效期。
 
 ## 范围与一致性
 

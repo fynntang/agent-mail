@@ -54,7 +54,11 @@ export async function findRetryBatchNotificationRetryReceipt(env:RuntimeEnv,box:
   return receipt(audit,box,notificationId,batchId,id,clientRequestId,expectedUpdatedAt);
 }
 /** Requeue an already-admitted frozen notice. The existing transport performs HTTP on a later tick. */
-export async function retryRetryBatchNotificationDelivery(ctx:OwnerContext,box:string,notificationId:string,id:string,input:unknown):Promise<RetryBatchNotificationDeliveryRetryResult>{
+export interface RetryBatchNotificationRetryInternalOptions {
+  /** Trusted scheduled executor only. API request bodies cannot supply this execution fence. */
+  batchGuard?:{batchId:string;leaseToken:string;itemVersion:number};
+}
+export async function retryRetryBatchNotificationDelivery(ctx:OwnerContext,box:string,notificationId:string,id:string,input:unknown,options:RetryBatchNotificationRetryInternalOptions={}):Promise<RetryBatchNotificationDeliveryRetryResult>{
   requireOwner(ctx.actor);const mailbox=await getMailbox(ctx,box);
   if(!['active','paused'].includes(mailbox.status)||!uuid.test(notificationId)||!uuid.test(id))throw new ServiceError('not_found',404);
   const data=objectInput(input,['clientRequestId','expectedUpdatedAt']);
@@ -87,9 +91,18 @@ export async function retryRetryBatchNotificationDelivery(ctx:OwnerContext,box:s
         AND e.source='app' AND e.source_event_id='retry-batch-notification:v1:'||n.id AND e.type='alert_notification.retry_batch.'||n.kind AND e.payload_json=?)
     AND EXISTS(SELECT 1 FROM webhook_endpoints w JOIN mailboxes m ON m.id=w.mailbox_id WHERE w.id=d.endpoint_id AND w.mailbox_id=d.mailbox_id AND w.status='active' AND m.status='active')
     AND COALESCE((SELECT version FROM alert_notification_policies WHERE mailbox_id=d.mailbox_id),0)=?
-    AND COALESCE((SELECT enabled FROM alert_notification_policies WHERE mailbox_id=d.mailbox_id),1)=1`;
+    AND COALESCE((SELECT enabled FROM alert_notification_policies WHERE mailbox_id=d.mailbox_id),1)=1
+    ${options.batchGuard?`AND EXISTS(SELECT 1 FROM retry_batch_notification_retry_items i JOIN retry_batch_notification_retry_batches b ON b.id=i.batch_id AND b.mailbox_id=i.mailbox_id
+      WHERE i.batch_id=? AND i.mailbox_id=d.mailbox_id AND i.delivery_id=d.id AND i.notification_id=? AND i.source_batch_id=?
+        AND i.expected_updated_at=d.updated_at AND i.client_request_id=? AND i.state='running' AND i.lease_token=? AND i.version=?
+        AND i.lease_until>MAX(?,CAST(unixepoch('subsec')*1000 AS INTEGER)) AND b.state IN('queued','running') AND b.committed_at IS NOT NULL
+        AND b.cancelled_at IS NULL AND b.expires_at>MAX(?,CAST(unixepoch('subsec')*1000 AS INTEGER)))`:''}`;
   const args:(string|number)[]=[id,box,expectedUpdatedAt,current.attempt_budget,current.payload_json,current.url_snapshot,current.signing_secret_ciphertext,current.signed_secret_version,
-    notificationId,current.batch_id,event!.payload_json,policy.version];
+    notificationId,current.batch_id,event!.payload_json,policy.version,
+    ...(options.batchGuard?[options.batchGuard.batchId,notificationId,current.batch_id,clientRequestId,options.batchGuard.leaseToken,options.batchGuard.itemVersion,now,now]:[])];
+  // Evaluate the real database clock at audit admission only. The transaction's queue update
+  // uses the same admitted boundary, so crossing a deadline cannot leave an audit without its mutation.
+  const mutationGuard=guard.replaceAll("MAX(?,CAST(unixepoch('subsec')*1000 AS INTEGER))",'?');
   let changedDelivery=false;
   try {
     const result=await ctx.env.DB.batch([
@@ -97,7 +110,7 @@ export async function retryRetryBatchNotificationDelivery(ctx:OwnerContext,box:s
         SELECT ?,?,'owner','webhook.delivery_retried',?,'success',?,?,? WHERE EXISTS(SELECT 1 FROM webhook_deliveries d WHERE ${guard})
         ON CONFLICT(id) DO NOTHING`).bind(auditId,box,id,ctx.requestId,metadata,now,...args),
       ctx.env.DB.prepare(`UPDATE webhook_deliveries AS d SET state='pending',attempt_budget=?,available_at=?,lease_token=NULL,lease_until=NULL,
-        last_error_code=NULL,completed_at=NULL,updated_at=? WHERE ${guard}
+        last_error_code=NULL,completed_at=NULL,updated_at=? WHERE ${mutationGuard}
         AND EXISTS(SELECT 1 FROM audit_events a WHERE a.id=? AND a.mailbox_id=d.mailbox_id AND a.resource_id=d.id AND a.action='webhook.delivery_retried' AND a.metadata_json=?) RETURNING id`)
         .bind(budget,now,now,...args,auditId,metadata)
     ]);changedDelivery=result[1].results.length===1;

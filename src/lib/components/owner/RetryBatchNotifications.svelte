@@ -5,6 +5,7 @@
   import type {RetryBatchNotification as Notification,RetryBatchNotificationList as Page,RetryBatchNotificationKind as Kind} from '#lib/types/retry-batch-notifications.ts';
   import Dialog from './Dialog.svelte';
   import RetryBatchNotificationDeliveries from './RetryBatchNotificationDeliveries.svelte';
+  import RetryBatchNotificationRetryBatches from './RetryBatchNotificationRetryBatches.svelte';
   type Status='unread'|'acknowledged'|'all';
   let {mailboxId,onViewBatch}:{mailboxId:string;onViewBatch:(id:string)=>Promise<void>}=$props();
   let result=$state<Page|null>(null),status=$state<Status>('unread'),kind=$state<Kind|'all'>('all'),loading=$state(true),busy=$state(false);
@@ -74,6 +75,8 @@
   <p class="notification-meta">“处理完成”包含跳过或失败；“已重新排队”不代表接收端已收到 Webhook。确认知悉不会解决待对账结果。</p>
   <nav class="notification-pagination" aria-label="批量任务通知分页"><button type="button" disabled={busy||!previous.length} onclick={()=>load(previous.at(-1)??null,'previous')}>上一页</button><span>本页 {result?.notifications.length??0} 项通知</span><button type="button" disabled={busy||!result?.nextCursor} onclick={()=>load(result?.nextCursor??null,'next')}>下一页</button></nav>
 </section>
+
+{#key mailboxId}<RetryBatchNotificationRetryBatches {mailboxId}/>{/key}
 
 {#if detail}<Dialog title="批量任务通知详情" busy={busy||deliveryBusy} onClose={()=>{if(!busy&&!deliveryBusy){detail=null;detailError='';}}}><div class="notification-detail">
   <h3>{titles[detail.kind]}</h3><p>{detail.acknowledgedAt===null?'待确认':`已知悉 · ${date(detail.acknowledgedAt)}`}</p>

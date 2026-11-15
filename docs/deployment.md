@@ -1,8 +1,26 @@
 # 个人部署与初始化
 
-项目提供本地一条命令部署和手动触发的 GitHub Actions。两者调用同一个部署器：创建或核对 D1、R2，写入实际绑定，构建，执行有序迁移，最后只部署 `worker/entry.ts` 这一个 Worker。SvelteKit、API、MCP、原生 email 和 scheduled 均在其中运行。
+项目提供 README 部署按钮、本地一条命令部署和手动触发的 GitHub Actions。全部路径最后只部署 `worker/entry.ts` 这一个 Worker，SvelteKit、API、MCP、原生 email 和 scheduled 均在其中运行。
 
 部署应用后，还需要在自己的 Cloudflare 账户配置 Access、邮件域名、Email Routing 和可选的 Email Sending。初始化向导区分资源检查、Owner 人工确认和应用观测记录，不把这些步骤视为已自动开通。
+
+## 部署按钮
+
+README 提供两个入口。Cloudflare 标准按钮克隆公开 GitHub 仓库并建立 Workers Builds，按 Wrangler 绑定配置 D1/R2。Cloudflare 明确要求源仓库为公开仓库，私有仓库可使用本仓库的 GitHub Actions 按钮；Fork 后请从自己仓库的 Actions 进入 `Deploy personal Agent Mail`，配置下文的变量及 Secret 后手动运行。[官方按钮与资源说明](https://developers.cloudflare.com/workers/platform/deploy-buttons/)
+
+使用 Cloudflare 标准按钮时：
+
+1. 确认源仓库公开，账户已启用 R2；在按钮界面选择 Worker、数据库与桶名称，保留 `DB` / `MAIL_BLOBS` 绑定名。
+2. 将 Wrangler 变量 `MAIL_DOMAIN` 和 `OWNER_EMAIL` 填为实际专用邮件域名、Owner 邮箱。构建环境提供 `CLOUDFLARE_ACCOUNT_ID`；若环境未自动提供，在 Workers Builds 的环境变量中填写所选账户 ID。
+3. 将独立的 Build command 留空（若界面要求非空，可填写 `node --version`），Deploy command 设为 `pnpm deploy:workers`（或 `pnpm run deploy`，明确调用package脚本）。部署脚本内会执行真正构建，先移除Cloudflare管理凭据，避免自动预填的外层 `pnpm build` 直接继承构建Token。使用 Node.js24和锁定的pnpm11。构建API Token需D1迁移、Worker发布及账户Workers子域读取权限。
+4. 按钮会提供实际 D1 ID/R2 名称；脚本验证这些绑定，拒绝全零占位 ID，使用已配置资源，不再创建第二份数据库或桶。示例 origin 会从账户 workers.dev 子域推导，实际自定义 origin 则保留。
+5. 部署入口仅在 `WORKERS_CI=1` 时选择此路径，重新检查和构建最终单Worker、按 `DB` 绑定执行远程有序迁移，再发布。迁移失败不上传Worker。本地 `pnpm run deploy` 仍是原离线计划，不因普通 `CI=true` 自动部署。[Workers Builds 环境变量](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/)
+6. 发送绑定默认关闭；账户已开通相应服务后，在构建环境设置 `AGENT_MAIL_ENABLE_SENDING=1` 再部署。`WEBHOOK_KEYRING` 等运行时 Secret 按功能需要配置，空值不会开放Owner访问；Cloudflare管理Token只用于构建控制面。
+7. 部署完成打开输出的 `/setup` 配置 Access，再进入 `/owner/setup` 核对邮件域名、路由与发送。按钮会为克隆仓库启用后续构建/部署，请在Workers Builds中审阅生产分支与自动部署设置。
+
+此路径假定已由按钮完成资源配置；普通 Git 仓库直接接入 Workers Builds 时，需要先配置实际 D1/R2 绑定。未完成资源配置可使用下文的一条命令部署器自动创建资源。当前提供的是本地模拟、构建与失败路径验证，尚未在真实Cloudflare账户完成按钮安装验收；不会因此改变仓库可见性或创建云端资源。
+
+Cloudflare按钮会将 `.dev.vars.example` 自动识别为Secret模板，因此该文件只保留注释，不提供localhost、Owner或其他默认值。完整的本地覆盖示例放在 `.dev.vars.local.example`，本地开发时复制为 `.dev.vars`；部署时公共设置来自Wrangler变量，按需启用的真实Secret在部署后另行配置，避免本地示例覆盖生产origin或Owner。
 
 ## 本地部署
 
@@ -59,7 +77,7 @@ API Token 限定到目标账户，包含创建/查询 D1、R2、查询/发布 Wo
 5. `wrangler d1 migrations apply DB --remote --config wrangler.jsonc`。
 6. `wrangler deploy --config wrangler.jsonc`，只上传一个 Worker，并输出初始化地址。
 
-迁移从 `0001_initial.sql` 按文件顺序执行，当前最新为 `0019_retry_batch_notifications.sql`，共54张 STRICT 表。初始化、OAuth、附件、Webhook、投递事件、本地及 Cloudflare 抑制、执行历史、告警、通知策略、查询索引、异步导出、终态通知及批量重试均使用增量迁移；部署工具会应用全部待执行文件。已有数据和旧版排队发送保持兼容；旧凭据不会自动获得收件附件权限，草稿附件沿用 mail:draft。
+迁移从 `0001_initial.sql` 按文件顺序执行，当前最新为 `0020_retry_batch_notification_retry_batches.sql`，共56张 STRICT 表。初始化、OAuth、附件、Webhook、投递事件、本地及 Cloudflare 抑制、执行历史、告警、通知策略、查询索引、异步导出、终态通知及批量重试均使用增量迁移；部署工具会应用全部待执行文件。已有数据和旧版排队发送保持兼容；旧凭据不会自动获得收件附件权限，草稿附件沿用 mail:draft。
 
 `wrangler.svelte.jsonc` 由根配置生成，只供 SvelteKit adapter 读取；禁止单独部署。部署工具保留明确配置过的 HTTP routes，但不自动创建域名/DNS、Email Routing 或 Access 策略。带 `addresses`、额外 DB/R2、其他环境或自定义 build 的模板会拒绝，避免在不了解其含义时覆盖复杂部署。
 
@@ -148,7 +166,7 @@ pnpm deploy:setup -- --input deploy.config.json --reuse-existing
 
 在 Actions → Deploy personal Agent Mail → Run workflow 点击运行。初次创建保持 `reuse_existing=false`；GitHub runner 没有上次本地状态，更新或中断后继续时，需要核对名称后显式选择 true。并发组防止同仓库同时发布，凭据仅注入最终部署步骤，既不写仓库也不放入运行时。
 
-GitHub 工作流文件已提供；本地测试不代表已在 GitHub 或真实 Cloudflare 账户运行。当前工作区尚未发布可部署 release，因此 README 不展示指向未发布代码的 Deploy to Cloudflare 按钮。正式 release 需用隔离账户完整安装验收后，再提供指向固定 tag 的按钮；Cloudflare 按钮的预配能力不替代邮件或 Access 接入。[Deploy 按钮](https://developers.cloudflare.com/workers/platform/deploy-buttons/)、[Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/)。
+README 已提供标准Cloudflare按钮及本仓库Actions入口。标准按钮要求源仓库公开；保持私有时可通过Actions运行已配置的部署工作流。按钮入口和部署失败处理经过本地模拟，但尚未在真实Cloudflare账户完成安装验收；生产使用建议固定已审阅版本。Cloudflare预配不替代邮件或Access接入。[Deploy 按钮](https://developers.cloudflare.com/workers/platform/deploy-buttons/)、[Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/)。
 
 ## 开源发布与卸载
 

@@ -28,8 +28,8 @@ const atomic = fn => {
 try {
  db.exec(sql);
  const tables = db.prepare("SELECT name,sql FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all();
- assert.equal(tables.length,54);
- test('54张个人版表加载，全部STRICT',()=>assert.ok(tables.every(t=>t.sql.trim().endsWith('STRICT'))));
+ assert.equal(tables.length,56);
+ test('56张个人版表加载，全部STRICT',()=>assert.ok(tables.every(t=>t.sql.trim().endsWith('STRICT'))));
  test('不包含租户、订阅或引擎账户表',()=>assert.ok(!tables.some(t=>/tenant|subscription|engine|user_sessions/.test(t.name))));
  test('外键检查已启用',()=>assert.equal(get('PRAGMA foreign_keys').foreign_keys,1));
  run("INSERT INTO instance_settings(id,instance_id,display_name,app_version,created_at,updated_at) VALUES(1,'instance','Owner','0.0.0',?,?)",now,now);
@@ -535,6 +535,35 @@ try {
    assert.equal(upgrade.prepare('SELECT count(*) n FROM async_export_retry_batch_notifications').get().n,0);assert.equal(upgrade.prepare("SELECT count(*) n FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'").get().n,54);
   }finally{upgrade.close();}
  });
+ const noticeBulkInsert=batchInsert.replaceAll('async_export_notification_retry_batches','retry_batch_notification_retry_batches');
+ const addNoticeBulk=id=>run(noticeBulkInsert,id,'a',id,hash,now,now,now+86400000,now+600000);
+ addNoticeBulk('notice-bulk-a');
+ reject('通知投递批量预览标识在邮箱内唯一',()=>run(noticeBulkInsert,'notice-bulk-duplicate','a','notice-bulk-a',hash,now,now,now+86400000,now+600000));
+ reject('通知投递批量固定候选与范围不可改写',()=>run("UPDATE retry_batch_notification_retry_batches SET to_ms=2,version=version+1,updated_at=updated_at+1 WHERE id='notice-bulk-a'"));
+ reject('通知投递批量未经确认不得执行',()=>run("UPDATE retry_batch_notification_retry_batches SET state='running',version=version+1,updated_at=updated_at+1 WHERE id='notice-bulk-a'"));
+ run("INSERT INTO webhook_endpoints(id,mailbox_id,url,event_types_json,signing_secret_ciphertext,created_at) VALUES('notice-bulk-hook','a','https://example.net/notice','[]','{}',?)",now);
+ run("INSERT INTO webhook_deliveries(id,mailbox_id,endpoint_id,event_id,available_at,signed_secret_version,signing_secret_ciphertext,created_at) VALUES('notice-bulk-delivery','a','notice-bulk-hook','event-a',?,1,'{}',?)",now,now);
+ const noticeItem=`INSERT INTO retry_batch_notification_retry_items(batch_id,mailbox_id,delivery_id,notification_id,source_batch_id,expected_updated_at,failure_reason,failed_at,preview_eligible,client_request_id,created_at,updated_at) VALUES('notice-bulk-a','a','notice-bulk-delivery',?,?,0,'http_rejected',?,1,?,?,?)`;
+ reject('通知条目不能把通知指向错误来源批次',()=>run(noticeItem,batchNotice.id,'retry-batch-a',now,'notice-wrong-source',now,now));
+ run(noticeItem,batchNotice.id,batchNotice.batch_id,now,'notice-bulk-item',now,now);
+ reject('通知投递条目原版本不可改写',()=>run("UPDATE retry_batch_notification_retry_items SET expected_updated_at=1,version=version+1,updated_at=updated_at+1 WHERE batch_id='notice-bulk-a'"));
+ run("UPDATE retry_batch_notification_retry_batches SET state='queued',commit_request_id='notice-bulk-commit',commit_expected_version=1,committed_at=?,version=version+1,updated_at=updated_at+1 WHERE id='notice-bulk-a'",now);
+ run("UPDATE retry_batch_notification_retry_items SET state='requeued',completed_at=?,version=version+1,updated_at=updated_at+1 WHERE batch_id='notice-bulk-a'",now);
+ const noticesBefore=get('SELECT count(*) n FROM async_export_retry_batch_notifications').n,eventsBefore=get('SELECT count(*) n FROM events').n;
+ run("UPDATE retry_batch_notification_retry_batches SET state='completed',processed_items=1,requeued_items=1,completed_at=?,version=version+1,updated_at=updated_at+1 WHERE id='notice-bulk-a'",now);
+ test('通知投递批量任务完成不递归生成通知或事件',()=>{assert.equal(get('SELECT count(*) n FROM async_export_retry_batch_notifications').n,noticesBefore);assert.equal(get('SELECT count(*) n FROM events').n,eventsBefore);});
+ reject('通知投递批量任务历史不可删除',()=>run("DELETE FROM retry_batch_notification_retry_batches WHERE id='notice-bulk-a'"));
+ reject('通知投递批量条目已执行结果不可重置',()=>run("UPDATE retry_batch_notification_retry_items SET state='pending',version=version+1,updated_at=updated_at+1 WHERE batch_id='notice-bulk-a'"));
+ test('0020升级保留原通知和批次且不补造重试任务',()=>{
+  const upgrade=new DatabaseSync(':memory:');try{
+   const index=migrationNames.indexOf('0020_retry_batch_notification_retry_batches.sql');upgrade.exec('PRAGMA foreign_keys=ON;');upgrade.exec(migrationTexts.slice(0,index).join('\n'));
+   upgrade.prepare("INSERT INTO mailboxes(id,name,created_at,updated_at) VALUES('bulk-legacy','Legacy',?,?)").run(now,now);
+   upgrade.prepare(batchInsert).run('old-bulk','bulk-legacy','old-preview',hash,now,now,now+86400000,now+600000);
+   const before=upgrade.prepare('SELECT * FROM async_export_notification_retry_batches').all();upgrade.exec(migrationTexts[index]);assert.deepEqual(upgrade.prepare('SELECT * FROM async_export_notification_retry_batches').all(),before);
+   for(const table of ['retry_batch_notification_retry_batches','retry_batch_notification_retry_items'])assert.equal(upgrade.prepare('SELECT count(*) n FROM '+table).get().n,0);
+   assert.equal(upgrade.prepare("SELECT count(*) n FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'").get().n,56);
+  }finally{upgrade.close();}
+ });
  test('最终foreign_key_check与integrity_check通过',()=>{
   assert.equal(db.prepare('PRAGMA foreign_key_check').all().length,0);
   assert.equal(get('PRAGMA integrity_check').integrity_check,'ok');
@@ -577,6 +606,8 @@ try {
    async_export_notification_state:'导出与批次通知按独立命名空间指纹复用的邮箱级Webhook限频时钟',
    async_export_notification_retry_batches:'Owner固定筛选预览、幂等确认、取消围栏与有界批量重试进度和结果历史',
    async_export_retry_batch_notifications:'批量任务完成/失败/待对账通知不可变快照、Owner确认及Webhook准入收据',
+   retry_batch_notification_retry_batches:'批次通知失败投递的独立固定预览、双UUID确认和有界执行进度，不递归生成通知',
+   retry_batch_notification_retry_items:'绑定原通知/来源批次/投递版本的不可变候选、租约及安全重试收据与结果',
    async_export_notification_retry_items:'不可变候选投递版本、逐条租约与排队/跳过/失败/未知结果收据',
    audit_events:'Owner、Token与系统操作审计',
    oauth_clients:'公开OAuth客户端登记与CIMD元数据',oauth_authorization_requests:'Owner同意请求与CSRF摘要',
@@ -616,7 +647,7 @@ try {
    + '验证环境：Node.js '+process.version+'，内置SQLite '+get('SELECT sqlite_version() version').version+'。在全新内存数据库中按序加载'+tables.length+'张STRICT表，完成'+checks.length+'项检查。\n\n'
    + '没有连接Cloudflare或生产数据库，没有部署应用、修改DNS或实际收发邮件。当前验证为SQLite语法、关系约束与本地事务行为，不能视为D1云端、Worker绑定或实际API/MCP验收。\n\n'
    + '## 执行方式\n\n支持node:sqlite的Node.js 24，无需npm或外部数据库依赖。\n\n```sh\nnode scripts/validate-schema.mjs\nnode scripts/validate-schema.mjs --dictionary\n```\n\n'
-   + '[验证脚本](../scripts/validate-schema.mjs)按序加载0001至0019有序迁移，最新为[批次完成与异常通知迁移](../migrations/0019_retry_batch_notifications.sql)，检查合并内容与[快照](schema.sql)一致。--dictionary从实际SQLite元数据重建[快照](schema.sql)、[字段字典](database.md)并更新本记录。每次使用内存数据库，不保留测试数据。\n\n'
+   + '[验证脚本](../scripts/validate-schema.mjs)按序加载0001至0020有序迁移，最新为[通知失败投递批量重试迁移](../migrations/0020_retry_batch_notification_retry_batches.sql)，检查合并内容与[快照](schema.sql)一致。--dictionary从实际SQLite元数据重建[快照](schema.sql)、[字段字典](database.md)并更新本记录。每次使用内存数据库，不保留测试数据。\n\n'
    + '## 已通过检查\n\n'+checks.map((c,i)=>(i+1)+'. '+c).join('\n')+'\n\n'
    + '## 验证边界\n\n此脚本只验证SQLite结构与事务，不是多Worker并发压测或完整权限验收。应用另有本地workerd测试覆盖D1失败补账、R2原文、原生事件、Token隔离及官方现代/旧MCP客户端；见[开发验证](development.md)与[MCP接入](mcp.md)。真实Access登录、云端MCP域名和目标Agent客户端仍待部署验收。\n\n'
    + '此脚本验证Webhook复合归属、冻结内容和尝试记录约束；应用测试另行覆盖AES-GCM/HMAC、密钥轮换、租约和HTTP重试，见[Webhook说明](webhooks.md)。云端Email Routing、真实Webhook目标、发送unknown对账、投递状态、域名配置和D1云端迁移仍需端到端验收。本地验证不表示真实邮件已投递。\n\n'

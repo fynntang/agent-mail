@@ -173,7 +173,7 @@ it('captures only active matching endpoint configuration versions inside all thr
 
 it('upgrades without backfilling already completed, failed or unresolved batches',async()=>{
   const old=new Miniflare(convertV4MiniflareOptions({modules:true,script:'export default {fetch(){return new Response("old")}}',d1Databases:{DB:'notice-upgrade'},log:new Log(LogLevel.ERROR)}));
-  try{const db=await old.getD1Database('DB');for(const name of(await readdir('migrations')).filter(name=>/^\d+.*\.sql$/.test(name)&&!name.startsWith('0019_')).sort())await db.batch(unstable_splitSqlQuery(await readFile(`migrations/${name}`,'utf8')).map(sql=>db.prepare(sql)));
+  try{const db=await old.getD1Database('DB');for(const name of(await readdir('migrations')).filter(name=>/^\d+.*\.sql$/.test(name)&&name<'0019_').sort())await db.batch(unstable_splitSqlQuery(await readFile(`migrations/${name}`,'utf8')).map(sql=>db.prepare(sql)));
     await db.prepare("INSERT INTO mailboxes(id,name,created_at,updated_at) VALUES('old','Legacy',?,?)").bind(at,at).run();
     await db.prepare(`INSERT INTO async_export_notification_retry_batches(id,mailbox_id,preview_request_id,request_hash,from_ms,to_ms,filter_reason,state,version,created_at,updated_at,expires_at,preview_expires_at,commit_request_id,commit_expected_version,committed_at,completed_at,total_items,eligible_items,processed_items,failed_items)
       VALUES('old-batch','old','old-preview',?,0,1,'all','completed',3,?,?,?,?, 'old-commit',1,?,?,1,1,1,1)`).bind('a'.repeat(64),at,at,at+86400000,at+600000,at,at).run();

@@ -179,7 +179,7 @@ it('pages safe immutable preview, commit and controls history with mailbox, batc
 
 it('upgrades the previous schema without rebuilding retained batches or changing their immutable identity',async()=>{
   const old=new Miniflare(convertV4MiniflareOptions({modules:true,script:'export default {fetch(){return new Response("old")}}',d1Databases:{DB:'retry-controls-upgrade'},log:new Log(LogLevel.ERROR)}));
-  try{const db=await old.getD1Database('DB');for(const name of(await readdir('migrations')).filter(name=>/^\d+.*\.sql$/.test(name)&&!name.startsWith('0018_')).sort())await db.batch(unstable_splitSqlQuery(await readFile(`migrations/${name}`,'utf8')).map(query=>db.prepare(query)));
+  try{const db=await old.getD1Database('DB');for(const name of(await readdir('migrations')).filter(name=>/^\d+.*\.sql$/.test(name)&&name<'0018_').sort())await db.batch(unstable_splitSqlQuery(await readFile(`migrations/${name}`,'utf8')).map(query=>db.prepare(query)));
     const oldCtx={...ctx,env:{...env,DB:db}},box=await createMailbox(oldCtx,{name:'Old',localPart:`old-${crypto.randomUUID()}`}),id=crypto.randomUUID(),previewId=crypto.randomUUID();
     await db.prepare("INSERT INTO async_export_notification_retry_batches(id,mailbox_id,preview_request_id,request_hash,from_ms,to_ms,filter_reason,created_at,updated_at,expires_at,preview_expires_at,total_items,eligible_items) VALUES(?,?,?,? ,0,1,'all',?,?,?,?,0,0)").bind(id,box.id,previewId,'a'.repeat(64),at,at,at+86400000,at+600000).run();
     const before=await db.prepare('SELECT * FROM async_export_notification_retry_batches WHERE id=?').bind(id).first();

@@ -1,25 +1,5 @@
-# Copy to .dev.vars for local development. No authentication bypass is provided.
-OWNER_EMAIL="you@example.com"
-ACCESS_TEAM_DOMAIN="https://CHANGE_ME.cloudflareaccess.com"
-ACCESS_AUD="CHANGE_ME"
-CONSOLE_ORIGIN="http://127.0.0.1:8787"
-API_ORIGIN="http://127.0.0.1:8787"
-MAIL_DOMAIN="agent.example.com"
-# Optional trusted HTTPS client metadata hosts, comma-separated. Empty uses public DCR clients only.
-OAUTH_CIMD_ALLOWED_HOSTS=""
-# Optional Webhooks: generate fresh AES-256 key(s) as described in docs/webhooks.md.
-# Keep wrapping keys as Worker secrets, never in wrangler vars or source control.
-WEBHOOK_KEYRING=""
-# Optional Email Sending lifecycle events. All five allowlist values are required.
-EMAIL_EVENT_QUEUE=""
-EMAIL_EVENT_ACCOUNT_ID=""
-EMAIL_EVENT_ZONE_ID=""
-EMAIL_EVENT_SUBSCRIPTION_ID=""
-EMAIL_EVENT_DOMAIN=""
-# Optional custom forwarding bridge only; Cloudflare native Queue delivery needs no HMAC secret.
-# 32–256 UTF-8 bytes, stored with wrangler secret put. See docs/email-delivery-events.md.
-EMAIL_EVENT_BRIDGE_SECRET=""
-# Optional provider suppression management. Token stays only in .dev.vars locally / Worker secrets remotely.
-EMAIL_SUPPRESSIONS_ACCOUNT_ID=""
-EMAIL_SUPPRESSIONS_DOMAIN=""
-EMAIL_SUPPRESSIONS_API_TOKEN=""
+# Deploy to Cloudflare auto-discovers this exact filename as Worker secrets.
+# Keep local origins, Owner settings and example values out of this file.
+# For local development, copy .dev.vars.local.example to .dev.vars.
+# Configure optional WEBHOOK_KEYRING, EMAIL_EVENT_BRIDGE_SECRET and
+# EMAIL_SUPPRESSIONS_API_TOKEN as Worker secrets only when enabling those features.

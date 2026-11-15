@@ -68,3 +68,5 @@ status 支持 unread（默认）、acknowledged、all；kind 支持 all（默认
 本地真实 D1、最终 Worker 和浏览器验证覆盖原子快照、无回填、重复/多次异常、取消后待对账、对账后的当前状态、确认 CAS、分页隔离、通知策略、HMAC/失败重试和 Agent 权限。桌面和手机验证详情、确认、全局计数及原批次定位，执行数量见[开发记录](development.md)。
 
 继续使用单 SvelteKit Worker、D1、现有 R2 和通知签名配置，无新增绑定、服务或依赖。本地验收不代表真实 Cloudflare 账户、DNS 或邮件服务已部署。相关任务控制见[取消与未知结果对账](async-export-notification-retry-controls.md)。
+
+Owner可对批次通知失败投递保存固定预览并幂等确认，后台每轮最多5项处理；0020增加独立两表，当前56表，新任务不生成自身通知或events，避免递归重试。静态Token/OAuth/MCP权限不扩大，详见[通知失败投递批量重试](retry-batch-notification-retry-batches.md)。
