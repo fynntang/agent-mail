@@ -137,3 +137,5 @@ Agent 的 endpoint.url 固定为 null，不泄露 URL 中可能存在的 query �
 运行 `pnpm check`、`pnpm build:worker`、`pnpm test`、`pnpm test:e2e`。测试验证独立 HMAC 计算、AES-GCM 绑定、轮换、并发扇出/领取、暂停的延迟事件、重试与过期租约、迟到响应、跨邮箱及权限、数据最小化、实际原生收发事件和本地 HTTP 替身。浏览器复用现有 Playwright/Chrome，当前没有 Browser 插件；桌面与手机验证 Owner 配置、一次性 secret、记录和重试。没有真实外部 HTTP 投递或远程部署验收。
 
 批次完成、失败和待对账提醒继续仅供Owner，三种通知Webhook沿用邮箱策略、签名与自动重试，详见[批次完成与异常通知](retry-batch-notifications.md)。
+
+批量任务通知支持Owner查看原决定/跳过原因、投递状态、传输尝试和手动重试收据。重新排队复用原冻结身份、当前策略及UUID/版本幂等，专用和通用Webhook入口采用相同校验；无新迁移或绑定，仍54张表。详见[批次通知投递追踪](retry-batch-notification-deliveries.md)。

@@ -130,7 +130,7 @@ it('isolates batch events, subscriptions, delivery attempts and generic retries 
   expect((await listMailEvents(agent,mailbox.id)).events).toEqual([]);expect((await listWebhookDeliveries(agent,mailbox.id)).deliveries).toEqual([]);
   const subscriptions=await listWebhookEndpoints(agent,mailbox.id);expect(subscriptions.endpoints[0].eventTypes).toEqual([]);for(const type of RETRY_BATCH_NOTIFICATION_TYPES)expect(subscriptions.eventTypes).not.toContain(type);
   const d=(await listWebhookDeliveries(ctx,mailbox.id)).deliveries[0];await expect(getWebhookDelivery(agent,mailbox.id,d.id)).rejects.toMatchObject({status:404});
-  await expect(retryWebhookDelivery(agent,mailbox.id,d.id,{})).rejects.toMatchObject({status:403});await expect(retryWebhookDelivery(ctx,mailbox.id,d.id,{})).rejects.toMatchObject({code:'webhook_retry_unavailable'});
+  await expect(retryWebhookDelivery(agent,mailbox.id,d.id,{})).rejects.toMatchObject({status:403});await expect(retryWebhookDelivery(ctx,mailbox.id,d.id,{})).rejects.toMatchObject({code:'invalid_input'});
   await expect(env.DB.prepare("UPDATE webhook_deliveries SET payload_json=json_set(payload_json,'$.type','message.received') WHERE id=?").bind(d.id).run()).rejects.toThrow('immutable');
   // Simulate an inconsistent old snapshot on a distinct endpoint; the durable event/receipt still wins over its declared type.
   const second=await endpoint(mailbox.id),inconsistent=crypto.randomUUID();await env.DB.prepare(`INSERT INTO webhook_deliveries(id,mailbox_id,endpoint_id,event_id,state,attempts,available_at,signed_secret_version,
@@ -138,7 +138,7 @@ it('isolates batch events, subscriptions, delivery attempts and generic retries 
     signing_secret_ciphertext,url_snapshot,json_set(payload_json,'$.type','message.received'),created_at,updated_at,attempt_budget FROM webhook_deliveries WHERE id=?`)
     .bind(inconsistent,second.endpoint.id,d.id).run();
   expect((await listWebhookDeliveries(agent,mailbox.id)).deliveries).toEqual([]);await expect(getWebhookDelivery(agent,mailbox.id,inconsistent)).rejects.toMatchObject({status:404});
-  await expect(retryWebhookDelivery(ctx,mailbox.id,inconsistent,{})).rejects.toMatchObject({code:'webhook_retry_unavailable'});expect((await rows('webhook_deliveries')).results.every(row=>row.state==='dead'&&row.attempt_budget===8)).toBe(true);
+  await expect(retryWebhookDelivery(ctx,mailbox.id,inconsistent,{clientRequestId:crypto.randomUUID(),expectedUpdatedAt:d.updatedAt})).rejects.toMatchObject({code:'retry_batch_notification_retry_unavailable'});expect((await rows('webhook_deliveries')).results.every(row=>row.state==='dead'&&row.attempt_budget===8)).toBe(true);
 });
 
 it('fences an admission policy version race and records the new disabled decision on the next bounded pass',async()=>{

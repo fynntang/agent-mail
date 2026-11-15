@@ -170,3 +170,5 @@ Webhook endpoint 严格属于一个邮箱，只有 Owner 管理。Owner创建end
 0018在原批次表增加不可改写的取消标记。取消和逐项执行通过D1事务及租约/版本围栏串行化，未执行条目停止，已重新排队结果保留。Owner手动对账只验证原稳定审计收据，有证据时恢复结果，无收据时在执行围栏后确认未提交，冲突保持unknown；取消/对账及分页历史复用audit_events。详见[取消与未知结果对账](async-export-notification-retry-controls.md)。
 
 0019在批次结果更新事务内捕获完成、失败和待对账通知快照，共54张表；基于结果转变去重并保留新的未知异常episode。快照和当前批次状态分别展示，Owner确认不改变执行结果。稳定outbox事件通过同一scheduled有界投影，外部通知复用邮箱策略及HMAC传输，限频指纹与原导出/Cloudflare抑制通知隔离。详见[批次完成与异常通知](retry-batch-notifications.md)。
+
+批次通知投递追踪沿用0019快照、事件和Webhook历史表，Owner GET只读查询不解密或推进通知。新的安全重试用稳定audit UUID和原投递版本，在同一D1事务中记录收据与增加有界预算，保留原签名/载荷/目标；真实通知收据优先路由通用重试入口，原跳过决定保持不变。现有0016审计索引足够，无新增DDL。详见[投递追踪](retry-batch-notification-deliveries.md)。

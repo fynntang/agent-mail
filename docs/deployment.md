@@ -202,3 +202,5 @@ GitHub 工作流文件已提供；本地测试不代表已在 GitHub 或真实 C
 批量任务可停止尚未执行的条目、手动核对未知收据并分页查看操作历史，已执行结果保留。应用0018迁移后仍为53张表，复用Owner权限与现有幂等收据，详见[取消与未知结果对账](async-export-notification-retry-controls.md)。
 
 批次完成与异常通知使用0019增量迁移，新增不可变快照及准入收据表，当前54张STRICT表。Owner提醒独立于外部通知策略；三个Owner级Webhook topic沿用原签名、静默、限频与失败退避，不增加绑定或Worker。详见[批次完成与异常通知](retry-batch-notifications.md)。
+
+批量任务通知支持Owner查看原决定/跳过原因、投递状态、传输尝试和手动重试收据。重新排队复用原冻结身份、当前策略及UUID/版本幂等，专用和通用Webhook入口采用相同校验；无新迁移或绑定，仍54张表。详见[批次通知投递追踪](retry-batch-notification-deliveries.md)。

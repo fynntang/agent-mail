@@ -102,3 +102,5 @@ Email Sending 当前为 Beta，限定事务性邮件；向任意收件人发送�
 部署工具已通过本地模拟测试；尚未执行真实 Cloudflare 账户安装或发布公开 release。发布可部署版本前需完成云端验收，再添加指向固定 release 的 Deploy to Cloudflare 按钮。
 
 唯一部署入口为 `worker/entry.ts`，adapter 只读取生成的 `wrangler.svelte.jsonc`。三个原生 handler 使用同一份最终 bundle。根配置含 `EMAIL` 发送绑定；本地使用模拟发送，真实发送需在自己的账户开通 Email Sending 并验证域名。
+
+批量任务通知支持Owner查看原决定/跳过原因、投递状态、传输尝试和手动重试收据。重新排队复用原冻结身份、当前策略及UUID/版本幂等，专用和通用Webhook入口采用相同校验；无新迁移或绑定，仍54张表。详见[批次通知投递追踪](docs/retry-batch-notification-deliveries.md)。

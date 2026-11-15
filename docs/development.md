@@ -76,6 +76,7 @@ R2 保存成功但最终 D1 batch 失败时，30 秒后的定时对账可以校�
 - Owner `.../export-notification-retry-batches/preview` 按当前邮箱/失败时间/安全原因固定最多1000候选，10分钟内明确 `.../{batchId}/commit` 后，每轮scheduled最多重新排队5项。预览和确认分别使用幂等UUID，进度/逐项结果复用D1和原单条审计；24小时截止，未知结果只读核对。详见[批量重试](async-export-notification-retry-batches.md)。
 - Owner `.../{batchId}/cancel` 停止未执行条目、撤销运行租约并保留已执行结果；`.../reconcile` 核对原重试收据，`.../operations` 分页读取操作历史。取消和对账各自使用 UUID+版本幂等收据，未知结果核对不增加预算。详见[取消与未知结果对账](async-export-notification-retry-controls.md)。
 - Owner `.../retry-batch-notifications` 查看完成、失败及待对账提醒，支持确认状态/类型筛选、分页和版本确认；通知快照与当前状态分别展示，可直接定位原批次。三个新Webhook类型沿用邮箱通知策略、HMAC和自动失败重试，详见[批次完成与异常通知](retry-batch-notifications.md)。
+- Owner `.../retry-batch-notifications/{notificationId}/delivery-results` 与 `/deliveries/{deliveryId}` 只读查看原准入、发布状态、全订阅计数、传输尝试和手动收据；`.../retry` 用原版本及UUID安全重新排队，通用Webhook入口复用相同校验。无新迁移，详见[批次通知投递追踪](retry-batch-notification-deliveries.md)。
 - 其他未实现的路径返回 404/405；通用附件预览尚未实现。
 
 根配置含 EMAIL 绑定，本地使用模拟发送。scheduled 还会处理最多2个 send_email 任务；提交外部调用后的未知结果不会重发。真实收信需要在 Cloudflare 启用 Email Routing 并将邮件路由到**同一个 Worker**；真实 cron 由根配置的 `triggers.crons` 设置。真实发信需单独开通 Email Sending 并验证域名。
@@ -95,20 +96,20 @@ R2 保存成功但最终 D1 batch 失败时，30 秒后的定时对账可以校�
 | 依赖 | 复用既有安装与锁文件，本轮未引入新依赖 |
 | pnpm check | Svelte 检查 0 错误、0 警告；原生 Worker tsc 通过 |
 | pnpm build:worker | SvelteKit 构建和根配置 dry-run 成功，含 Owner 页面和 API，保持单 Worker |
-| 构建配置 | 原生入口与 adapter 保留严格公网 fetch；产物2781.74 KiB / gzip580.14 KiB，仍为单 Worker，导出 fetch/email/scheduled/queue |
-| 数据库 / 配置脚本 | 54张表，224项 / 21项检查通过；0019新增不可变通知快照、端点配置围栏及无回填升级检查，schema快照与字典已更新 |
-| 核心与持久化测试 | 425个通过；本轮新增28个原子事实/多次异常/取消/到期、并发投影/确认、策略/签名重试、未来逻辑时间订阅围栏、Agent隔离及初始化检查用例 |
+| 构建配置 | 原生入口与 adapter 保留严格公网 fetch；产物2812.97 KiB / gzip582.52 KiB，仍为单 Worker，导出 fetch/email/scheduled/queue |
+| 数据库 / 配置脚本 | 54张表，224项 / 21项检查通过；本轮复用0019及0016审计索引，无新迁移、绑定或依赖 |
+| 核心与持久化测试 | 444个通过；本轮新增19个真实D1投递追踪、完整分页/脱敏、原收据幂等、lostACK、policy竞争/回滚、预算80、冻结身份及Agent权限检查用例 |
 | 部署工具测试 | 66个通过，复用既有部署恢复、账户匹配、凭据隔离及输出脱敏检查 |
-| Worker 集成测试 | 100个通过；本轮新增3个最终Worker流程验证完成与HMAC503→204、取消后unknown历史与当前状态、真实失败+完成双事实、策略关闭/分页及Owner/Origin/Agent隔离 |
-| 浏览器 E2E | 最终bundle26个完整流程通过；本轮新增8条通知筛选/分页、CAS409、批次定位和全局深链接、对账后历史保留、disabled策略及7份通知HMAC投递+1次自动重试；Chrome，桌面1488×1056、手机390×844 |
+| Worker 集成测试 | 103个通过；本轮新增3个最终Worker流程验证发布阶段、6订阅完整分页、无key只读、专用/通用安全重试、HMAC400→204及原skip不可补发 |
+| 浏览器 E2E | 最终bundle27个完整流程通过；本轮新增6投递5+1分页、丢响应UUID核对、stale409、尝试/手动收据、HMAC冻结身份及disabled/quiet策略；Chrome，桌面1488×1056、手机390×844 |
 | 部署入口 | 离线 deploy:plan 与实际 Windows pnpm 子进程检查通过；GitHub 手动工作流未在远程运行 |
-| 本地升级 | pnpm db:local 已应用0019（8条迁移命令）；54张表，旧批次/逐项结果/投递/审计保留，不回填旧通知或重新排队，无需重建数据库 |
+| 本地升级 | 既有本地0019已应用；本轮无新DDL，54张表及全部历史保留，无需执行新迁移 |
 | 持久本地流程 | 既有 db:local → local:seed → preview → email → scheduled → API 已验证；本轮复用独立内存 D1/R2 完整集成与浏览器测试 |
 | Vite 开发模式 | 既有 dev 首页与 healthz 200 验证保留；本轮针对最终 Worker bundle 验证 |
 
 集成测试会故意注入 D1 错误并拒绝未知邮箱，相关错误日志属于预期断言；以测试退出码和通过状态判断结果。本轮未创建真实云资源、部署远程 Worker 或触发真实邮件投递；DNS、Access 策略与邮件服务开通仍需云端验收。测试使用独立内存资源，开发服务器已停止。
 
-此前完整集成回归中，两个既有 MCP 测试文件在断言通过后未退出。检查后在测试层统一传递 Request.signal、先关闭客户端再销毁 Miniflare，保留全部断言与超时。本轮沿用该清理机制，完整 `pnpm test:integration` 的100项集成测试正常退出并全部通过。
+此前完整集成回归中，两个既有 MCP 测试文件在断言通过后未退出。检查后在测试层统一传递 Request.signal、先关闭客户端再销毁 Miniflare，保留全部断言与超时。本轮沿用该清理机制，完整 `pnpm test` 的103项集成测试正常退出并全部通过。
 
 附件界面验收使用既有 Playwright/Chrome（当前没有 Browser 插件）：`http://127.0.0.1:4198/owner/mailboxes/{id}/messages` → 查看元数据 → 下载 Unicode 文本与 SVG → 校验字节。页面身份、非空内容、无框架错误覆盖层、无相关 console error/warn、桌面/手机布局及实际操作均通过。下载保留未读状态，附件内脚本和远程图片均未加载；Token/OAuth 选择验证附件范围依赖邮件读取。浏览器仅在本地运行，不代表真实 Access 登录或 Cloudflare 收信已验收。
 
@@ -161,3 +162,9 @@ Cloudflare名单验收为 `http://127.0.0.1:4205/owner/mailboxes/{id}/suppressio
 桌面1488×1056、手机390×844及冲突状态截图已目检，无横向溢出、框架错误或异常遮挡。pageerror和非预期外部请求为零，console只有刻意制造的1次409。Browser插件不可用，按 frontend-testing-debugging 工作流沿用Playwright/Chrome，截图保存在源码目录之外。浏览器循环发现并修复全局新hash未展开父级通知面板的问题；最终bundle完成全部26项浏览器回归。
 
 新增快照在结果事务内保存，不回填旧终态；同一通知按稳定ID投影，重复cron、确认和读取均不重发。端点配置快照精确匹配id/密钥版本/配置更新时间，真实D1用例覆盖source逻辑时间晚于wallclock时，晚创建与后编辑端点仍被排除。限频复用已有状态表但加独立命名空间；Owner提醒、确认和currentAttention与Webhook准入分开。最终 `pnpm check` 0错误0警告，build:worker成功；test:unit 425、test:deploy 66、test:integration 100、test:e2e 26全部通过，数据库/配置224/21项通过。具体协议、类型和边界见[批次完成与异常通知](retry-batch-notifications.md)。
+
+批次通知投递追踪验收为 `http://127.0.0.1:4217/owner/mailboxes/{id}/suppressions` → 查看真实通知决策与发布状态 → 6个订阅的HTTP400失败及5+1投递分页 → 查看安全尝试历史 → 明确重新排队时丢失响应 → 沿原UUID/原版本核对，预算8→16只增加一次 → 后续HMAC204保留原ID/载荷/URL/签名版本 → 查看2次尝试及1条Owner收据 → 旧版本409 → 通用Webhook页同协议手动重试 → 当前策略disabled/quiet阻止专用与通用入口 → 原disabled通知无投递、不可手动补发。测试等待既有source重排占用的每轮2条HTTP预算，不绕过实际cron预算。
+
+桌面1488×1056、手机390×844和冲突截图已目检，无溢出、重叠、框架错误或异常外部请求；console只有刻意制造的1次POST网络中断和1次409，pageerror为零。Browser插件不可用，沿用已读取的frontend-testing-debugging工作流与Playwright/Chrome，截图位于源码目录之外。Owner GET前后审计、事件、尝试及外部请求数不变，密钥缺失仍能查看历史。真实D1单测覆盖budget80、丢ACK、跨通知UUID冲突、原skip不可重新准入、policy变更竞争与回滚、暂停邮箱只读收据重放、端点轮换后仍用旧冻结版本及假载荷/端点拒绝。完整协议见[批次通知投递追踪](retry-batch-notification-deliveries.md)。
+
+本轮最终 `pnpm check` 无错误或警告，build:worker成功；完整 `pnpm test` 通过444项单元、66项部署和103项集成，`pnpm test:e2e` 的27项全部通过。数据库/配置224/21项继续通过，未部署远端Worker或发送真实邮件/Webhook。此前完整实现已提交至c7f05c7并推送main，本轮投递追踪作为独立后续提交。

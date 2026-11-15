@@ -4,6 +4,7 @@
   import {ownerRequest} from '#lib/owner-client.ts';
   import type {RetryBatchNotification as Notification,RetryBatchNotificationList as Page,RetryBatchNotificationKind as Kind} from '#lib/types/retry-batch-notifications.ts';
   import Dialog from './Dialog.svelte';
+  import RetryBatchNotificationDeliveries from './RetryBatchNotificationDeliveries.svelte';
   type Status='unread'|'acknowledged'|'all';
   let {mailboxId,onViewBatch}:{mailboxId:string;onViewBatch:(id:string)=>Promise<void>}=$props();
   let result=$state<Page|null>(null),status=$state<Status>('unread'),kind=$state<Kind|'all'>('all'),loading=$state(true),busy=$state(false);
@@ -11,6 +12,7 @@
   const base=$derived(`/owner/api/mailboxes/${mailboxId}/retry-batch-notifications`),controller=new AbortController();
   const titles:Record<Kind,string>={completed:'批量任务处理完成',failed:'批量任务执行异常',needs_reconciliation:'批量任务结果待对账'};
   const states:Record<string,string>={preview:'待确认预览',queued:'等待执行',running:'正在执行',completed:'处理完成',expired:'已过期',cancelled:'已停止未执行条目'};
+  let deliveryBusy=$state(false);
   let mounted=false,knownSummary='',timer:ReturnType<typeof setTimeout>|undefined;
   onMount(()=>{mounted=true;document.addEventListener('visibilitychange',visibilityChanged);void load(null);});
   onDestroy(()=>{mounted=false;clearTimeout(timer);controller.abort();document.removeEventListener('visibilitychange',visibilityChanged);});
@@ -18,7 +20,7 @@
   function decision(value:Notification):string{return value.notificationDecision===null?'等待评估通知策略':({allowed:'已准入 Webhook，实际结果请查看邮箱投递记录',disabled:'通知关闭，本次未发送 Webhook',quiet_hours:'静默命中，本次未发送 Webhook',repeat_limited:'重复限频，本次未发送 Webhook',no_subscribers:'无匹配订阅，本次未发送 Webhook'} as Record<string,string>)[value.notificationDecision]??'通知状态暂不可用';}
   function reason(value:Notification):string{return value.reason==='expired'?'批次已过执行期限，未完成条目不再创建新排队。':value.kind==='failed'?'本批次出现执行失败，请核对逐项原因。':value.kind==='needs_reconciliation'?'有结果尚未确认，请核对原操作收据。':'本批次已完成逐项处理，可能包含跳过或失败。';}
   function current(value:Notification):string{return value.kind==='needs_reconciliation'?(value.currentAttention?'当前仍有待对账结果。':'当前已无待对账结果，原提醒作为历史保留。'):value.kind==='failed'?(value.currentAttention?'当前仍有异常结果，请在批次中核对。':'当前异常状态已变化，原提醒作为历史保留。'):'请在批次及原投递记录中核对实际结果。';}
-  function schedule(){clearTimeout(timer);if(mounted&&!controller.signal.aborted&&!busy&&document.visibilityState==='visible')timer=setTimeout(()=>{void load(cursor,'same',false);},15_000);}
+  function schedule(){clearTimeout(timer);if(mounted&&!controller.signal.aborted&&!busy&&!deliveryBusy&&document.visibilityState==='visible')timer=setTimeout(()=>{void load(cursor,'same',false);},15_000);}
   function visibilityChanged(){clearTimeout(timer);if(document.visibilityState==='visible'&&!busy)void load(cursor,'same',false);}
   async function fetchPage(value:string|null){
     const query=new URLSearchParams({status,kind,limit:'5'});if(value)query.set('cursor',value);
@@ -42,14 +44,14 @@
     finally{if(mounted){busy=false;schedule();}}
   }
   async function acknowledge(item:Notification){
-    if(busy||item.acknowledgedAt!==null)return;clearTimeout(timer);busy=true;errorMessage='';detailError='';notice='';
+    if(busy||deliveryBusy||item.acknowledgedAt!==null)return;clearTimeout(timer);busy=true;errorMessage='';detailError='';notice='';
     try{const next=await ownerRequest<{notification:Notification}>(`${base}/${item.id}/acknowledge`,{method:'POST',body:{expectedVersion:item.version},signal:controller.signal});
       if(!mounted)return;if(detail?.id===item.id)detail=next.notification;notice='已确认知悉此批量任务通知。任务处理、待对账结果和 Webhook 投递保持保留。';await fetchPage(null);previous=[];}
     catch(error){if(mounted){const message=error instanceof Error?error.message:'确认未完成，请刷新核对。';if(detail)detailError=message;else errorMessage=message;}}
     finally{if(mounted){busy=false;schedule();}}
   }
   async function viewBatch(item:Notification){
-    if(busy)return;clearTimeout(timer);busy=true;errorMessage='';detailError='';const before=detail;if(detail){detail=null;await tick();}
+    if(busy||deliveryBusy)return;clearTimeout(timer);busy=true;errorMessage='';detailError='';const before=detail;if(detail){detail=null;await tick();}
     try{await onViewBatch(item.batchId);}
     catch(error){if(mounted){const message=error instanceof Error?error.message:'批次读取失败，请刷新后核对。';if(before){detail=before;detailError=message;}else errorMessage=message;}}
     finally{if(mounted){busy=false;schedule();}}
@@ -73,12 +75,13 @@
   <nav class="notification-pagination" aria-label="批量任务通知分页"><button type="button" disabled={busy||!previous.length} onclick={()=>load(previous.at(-1)??null,'previous')}>上一页</button><span>本页 {result?.notifications.length??0} 项通知</span><button type="button" disabled={busy||!result?.nextCursor} onclick={()=>load(result?.nextCursor??null,'next')}>下一页</button></nav>
 </section>
 
-{#if detail}<Dialog title="批量任务通知详情" {busy} onClose={()=>{if(!busy){detail=null;detailError='';}}}><div class="notification-detail">
+{#if detail}<Dialog title="批量任务通知详情" busy={busy||deliveryBusy} onClose={()=>{if(!busy&&!deliveryBusy){detail=null;detailError='';}}}><div class="notification-detail">
   <h3>{titles[detail.kind]}</h3><p>{detail.acknowledgedAt===null?'待确认':`已知悉 · ${date(detail.acknowledgedAt)}`}</p>
   <dl><div><dt>通知 ID</dt><dd><code>{detail.id}</code></dd></div><div><dt>批次 ID</dt><dd><code>{detail.batchId}</code></dd></div><div><dt>记录时间</dt><dd>{date(detail.occurredAt)} · 版本 {detail.sourceVersion}</dd></div><div><dt>原状态</dt><dd>{states[detail.batchState]??detail.batchState}</dd></div><div><dt>原结果快照</dt><dd>已处理 {detail.processedItems}/{detail.totalItems} · 已重新排队 {detail.requeuedItems} · 跳过 {detail.skippedItems} · 失败 {detail.failedItems} · 待对账 {detail.unknownItems}</dd></div><div><dt>当前状态</dt><dd>{states[detail.currentBatch.state]??detail.currentBatch.state} · 版本 {detail.currentBatch.version}<br/>已处理 {detail.currentBatch.processedItems}/{detail.currentBatch.totalItems} · 失败 {detail.currentBatch.failedItems} · 待对账 {detail.currentBatch.unknownItems}</dd></div><div><dt>通知策略</dt><dd>{decision(detail)}<br/>版本 {detail.policyVersion??'—'} · {date(detail.decidedAt)}</dd></div></dl>
   <p>{reason(detail)} {current(detail)}</p><p>此提醒记录当时事实，原快照不会随之后对账改写。确认知悉只更新控制台状态，不停止任务、不解决异常，也不重发 Webhook。</p>
   {#if detailError}<div class="notice error" role="alert">{detailError}</div>{/if}
-  <div class="notification-actions"><button type="button" disabled={busy} onclick={()=>viewBatch(detail!)}>查看对应批次</button>{#if detail.acknowledgedAt===null}<button type="button" disabled={busy} onclick={()=>acknowledge(detail!)}>确认知悉此批量通知</button>{/if}</div>
+  <div class="notification-actions"><button type="button" disabled={busy||deliveryBusy} onclick={()=>viewBatch(detail!)}>查看对应批次</button>{#if detail.acknowledgedAt===null}<button type="button" disabled={busy||deliveryBusy} onclick={()=>acknowledge(detail!)}>确认知悉此批量通知</button>{/if}</div>
+  {#key detail.id}<RetryBatchNotificationDeliveries {mailboxId} notificationId={detail.id} onBusyChange={value=>{deliveryBusy=value;if(value)clearTimeout(timer);else schedule();}}/>{/key}
 </div></Dialog>{/if}
 
 <style>

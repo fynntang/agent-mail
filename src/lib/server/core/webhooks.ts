@@ -221,8 +221,12 @@ export async function retryWebhookDelivery(ctx:OwnerContext,box:string,id:string
   let declaredType:unknown;try{declaredType=JSON.parse(row.payload_json)?.type;}catch{/* Invalid snapshots cannot opt out of export receipt authorization. */}
   const batchReceipt=await ctx.env.DB.prepare(`SELECT e.type,n.id notification_id FROM events e LEFT JOIN async_export_retry_batch_notifications n ON n.mailbox_id=e.mailbox_id AND n.event_id=e.id
     WHERE e.mailbox_id=? AND e.id=?`).bind(box,row.event_id).first<{type:string;notification_id:string|null}>();
-  // Batch notices use the existing automatic transport budget. A generic manual retry must not bypass their immutable admission.
-  if(batchReceipt?.notification_id||isRetryBatchNotification(batchReceipt?.type??'')||isRetryBatchNotification(String(declaredType)))throw new ServiceError('webhook_retry_unavailable',409);
+  // Route by the real receipt/event before inspecting the frozen payload's declaration.
+  if(batchReceipt?.notification_id||isRetryBatchNotification(batchReceipt?.type??'')||isRetryBatchNotification(String(declaredType))){
+    if(!batchReceipt?.notification_id)throw new ServiceError('not_found',404);
+    const {retryRetryBatchNotificationDelivery}=await import('./retry-batch-notification-retry');
+    return retryRetryBatchNotificationDelivery(ctx,box,batchReceipt.notification_id,id,input);
+  }
   if(receipt||['alert_notification.export.succeeded','alert_notification.export.failed'].includes(String(declaredType))){
     if(!receipt)throw new ServiceError('not_found',404);
     const {retryAsyncExportNotificationDelivery}=await import('./async-export-notification-retry');

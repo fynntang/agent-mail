@@ -41,6 +41,9 @@ src/
     async-export-notification-delivery-shared.ts 严格绑定通知快照、事件与冻结投递内容
     async-export-notification-retry.ts Owner幂等CAS重排队、实时策略及冻结凭据校验
     async-export-notification-retry-batches.ts Owner固定候选预览、双UUID幂等确认、配额和批次/结果分页
+    retry-batch-notification-deliveries.ts Owner通知决定、投递状态/尝试/手动收据与分页
+    retry-batch-notification-delivery-shared.ts 真实通知事件与冻结载荷/原捕获端点匹配
+    retry-batch-notification-retry.ts 稳定UUID收据、原版本和当前策略下原子重新排队
     retry-batch-notifications.ts 批次完成/异常快照、Owner确认与事件投影
     retry-batch-notification-admission.ts 精确快照验签关联、邮箱策略与独立限频指纹
     async-export-notification-retry-controls.ts Owner取消、原收据对账及幂等操作历史
