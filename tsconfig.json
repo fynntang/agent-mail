@@ -1,0 +1,13 @@
+{
+  "extends": "$app/tsconfig",
+  "compilerOptions": {
+    "strict": true,
+    "allowJs": true,
+    "checkJs": false,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "types": ["$app/types", "@cloudflare/workers-types", "node"]
+  },
+  "include": ["src", "tests/unit", "vite.config.ts", "vitest.config.ts"],
+  "exclude": ["src/service-worker"]
+}

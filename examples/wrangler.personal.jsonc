@@ -1,0 +1,33 @@
+// 单 Worker 部署示例；先替换实际资源与实例变量，再通过部署工具发布。
+// nodejs_compat 与 global_fetch_strictly_public 必须保留在原生及 adapter 配置。
+{
+  "name": "agent-mail-personal",
+  "main": "worker/entry.ts",
+  "compatibility_date": "2026-11-13",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".svelte-kit/cloudflare",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "agent-mail-personal",
+    "database_id": "00000000-0000-0000-0000-000000000000",
+    "migrations_dir": "migrations"
+  }],
+  "r2_buckets": [{ "binding": "MAIL_BLOBS", "bucket_name": "agent-mail-personal" }],
+  "send_email": [{ "name": "EMAIL" }],
+  "triggers": { "crons": ["* * * * *"] },
+  "vars": {
+    "OWNER_EMAIL": "CHANGE_ME",
+    "ACCESS_TEAM_DOMAIN": "https://CHANGE_ME.cloudflareaccess.com",
+    "ACCESS_AUD": "CHANGE_ME",
+    "CONSOLE_ORIGIN": "https://console.example.com",
+    "API_ORIGIN": "https://api.example.com",
+    "MAIL_DOMAIN": "agent.example.com"
+  }
+}
+// 不预置addresses，避免占用/删除现有邮件路由。子域不能直接套根域catch-all。
+// R2桶必须保持私有。DB/R2 ID在正式部署预配时替换；secret不进入vars。
+// adapter必须读生成的wrangler.svelte.jsonc；不能把本配置传给adapter。

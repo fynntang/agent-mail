@@ -1,0 +1,58 @@
+{
+  "name": "agent-mail",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#lib/*": "./src/lib/*"
+  },
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "packageManager": "pnpm@11.25.0",
+  "scripts": {
+    "config:sync": "node scripts/sync-svelte-config.mjs",
+    "dev": "pnpm config:sync && vite --host 127.0.0.1",
+    "build": "pnpm config:sync && vite build",
+    "check": "pnpm config:sync && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && tsc -p tsconfig.worker.json --noEmit",
+    "db:local": "wrangler d1 migrations apply DB --config wrangler.jsonc --local --persist-to .wrangler/state",
+    "local:seed": "node scripts/seed-local.mjs",
+    "preview": "wrangler dev --config wrangler.jsonc --local --test-scheduled --ip 127.0.0.1 --persist-to .wrangler/state",
+    "build:worker": "pnpm build && wrangler deploy --config wrangler.jsonc --dry-run --outdir dist/worker",
+    "deploy:plan": "node scripts/deploy.mjs",
+    "deploy": "node scripts/deploy.mjs",
+    "deploy:setup": "node scripts/deploy.mjs --apply",
+    "webhook:keyring": "node scripts/generate-webhook-keyring.mjs",
+    "test:schema": "node scripts/validate-schema.mjs && node scripts/validate-svelte-config.mjs",
+    "test:unit": "vitest run",
+    "test:deploy": "node --test tests/deploy/cloudflare.test.mjs tests/deploy/deploy.test.mjs",
+    "test:integration": "node --test --test-concurrency=1 tests/integration/worker.test.mjs tests/integration/owner.test.mjs tests/integration/mail.test.mjs tests/integration/outbound.test.mjs tests/integration/mcp.test.mjs tests/integration/oauth.test.mjs tests/integration/setup.test.mjs tests/integration/attachments.test.mjs tests/integration/outbound-attachments.test.mjs tests/integration/html-mail.test.mjs tests/integration/cid-mail.test.mjs tests/integration/html-outbound.test.mjs tests/integration/webhooks.test.mjs tests/integration/delivery-events.test.mjs tests/integration/suppressions.test.mjs tests/integration/cloudflare-suppressions.test.mjs tests/integration/cloudflare-suppression-history.test.mjs tests/integration/cloudflare-suppression-alerts.test.mjs tests/integration/alert-notification-policy.test.mjs tests/integration/alert-notification-decisions.test.mjs tests/integration/alert-notification-export.test.mjs tests/integration/async-alert-notification-export.test.mjs tests/integration/async-export-notifications.test.mjs tests/integration/async-export-notification-deliveries.test.mjs tests/integration/async-export-notification-retry-batches.test.mjs tests/integration/async-export-notification-retry-controls.test.mjs tests/integration/retry-batch-notifications.test.mjs",
+    "test:e2e": "node --test --test-concurrency=1 tests/e2e/owner.test.mjs tests/e2e/mail.test.mjs tests/e2e/outbound.test.mjs tests/e2e/oauth.test.mjs tests/e2e/setup.test.mjs tests/e2e/attachments.test.mjs tests/e2e/outbound-attachments.test.mjs tests/e2e/html-mail.test.mjs tests/e2e/html-outbound.test.mjs tests/e2e/webhooks.test.mjs tests/e2e/delivery-events.test.mjs tests/e2e/suppressions.test.mjs tests/e2e/cloudflare-suppressions.test.mjs tests/e2e/cloudflare-suppression-history.test.mjs tests/e2e/cloudflare-suppression-alerts.test.mjs tests/e2e/alert-notification-policy.test.mjs tests/e2e/alert-notification-decisions.test.mjs tests/e2e/alert-notification-export.test.mjs tests/e2e/async-alert-notification-export.test.mjs tests/e2e/async-export-notifications.test.mjs tests/e2e/async-export-notification-deliveries.test.mjs tests/e2e/async-export-notification-retry-batches.test.mjs tests/e2e/async-export-notification-retry-controls.test.mjs tests/e2e/retry-batch-notifications.test.mjs",
+    "test": "pnpm test:schema && pnpm test:unit && pnpm test:deploy && pnpm test:integration"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.4.0",
+    "htmlparser2": "12.0.0",
+    "jose": "6.2.17",
+    "postal-mime": "4.2.1",
+    "sanitize-html": "2.18.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261113.1",
+    "@modelcontextprotocol/client": "2.4.0",
+    "@playwright/test": "1.65.0",
+    "@sveltejs/adapter-cloudflare": "8.0.2",
+    "@sveltejs/kit": "3.2.0",
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "@types/node": "26.6.6",
+    "@types/sanitize-html": "2.16.2",
+    "miniflare": "5.20261110.2-beta",
+    "svelte": "5.57.3",
+    "svelte-check": "4.7.8",
+    "typescript": "6.0.2",
+    "vite": "8.3.8",
+    "vitest": "5.1.0",
+    "wrangler": "4.161.0"
+  }
+}

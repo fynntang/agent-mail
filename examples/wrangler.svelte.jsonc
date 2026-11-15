@@ -1,0 +1,42 @@
+// GENERATED: adapter 构建输入，不得单独部署。
+{
+  "name": "agent-mail-personal",
+  "main": ".svelte-kit/cloudflare/_worker.js",
+  "compatibility_date": "2026-11-13",
+  "compatibility_flags": [
+    "nodejs_compat",
+    "global_fetch_strictly_public"
+  ],
+  "assets": {
+    "directory": ".svelte-kit/cloudflare",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "agent-mail-personal",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MAIL_BLOBS",
+      "bucket_name": "agent-mail-personal"
+    }
+  ],
+  "send_email": [
+    {
+      "name": "EMAIL"
+    }
+  ],
+  "vars": {
+    "OWNER_EMAIL": "CHANGE_ME",
+    "ACCESS_TEAM_DOMAIN": "https://CHANGE_ME.cloudflareaccess.com",
+    "ACCESS_AUD": "CHANGE_ME",
+    "CONSOLE_ORIGIN": "https://console.example.com",
+    "API_ORIGIN": "https://api.example.com",
+    "MAIL_DOMAIN": "agent.example.com"
+  }
+}

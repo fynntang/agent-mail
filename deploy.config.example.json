@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "accountId": "00000000000000000000000000000000",
+  "workerName": "agent-mail-personal",
+  "databaseName": "agent-mail-personal",
+  "bucketName": "agent-mail-personal",
+  "mailDomain": "agent.example.com",
+  "ownerEmail": "owner@example.com",
+  "consoleOrigin": "",
+  "apiOrigin": "",
+  "accessTeamDomain": "",
+  "accessAud": "",
+  "enableSending": false,
+  "cimdAllowedHosts": []
+}

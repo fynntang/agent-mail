@@ -1,0 +1,29 @@
+.owner-shell .oauth-content{max-width:900px;display:grid;gap:28px}
+.owner-shell .oauth-content h2,.owner-shell .oauth-grants h2{font-size:20px;line-height:1.4;margin:0 0 7px}
+.owner-shell .oauth-content p,.owner-shell .oauth-grants p,.owner-shell .oauth-intro{font-size:14px;color:var(--muted);margin:0 0 16px}
+.owner-shell .oauth-client,.owner-shell .oauth-consent,.owner-shell .oauth-grants section{border:1px solid var(--line);border-radius:9px;padding:24px;min-width:0}
+.owner-shell .oauth-client{background:var(--paper)}
+.owner-shell .oauth-metadata{margin:0 0 20px;display:grid;gap:10px;font-size:14px}
+.owner-shell .oauth-metadata>div{display:grid;grid-template-columns:130px minmax(0,1fr);gap:14px}
+.owner-shell .oauth-metadata dt{color:var(--muted)}
+.owner-shell .oauth-metadata dd{margin:0;overflow-wrap:anywhere;min-width:0}
+.owner-shell .oauth-metadata code{font:12px/1.7 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+.owner-shell .oauth-warning{background:#fbf0d9;color:#745521;border:1px solid #e4cf9e;padding:12px 14px;border-radius:7px;font-size:13px;line-height:1.7;margin:16px 0 0}
+.owner-shell .oauth-consent h2{margin-bottom:22px}
+.owner-shell .oauth-mailbox-preview{display:grid;gap:3px;border:1px solid var(--line);border-radius:7px;padding:12px 14px;margin:-5px 0 22px;background:var(--paper);font-size:14px;overflow-wrap:anywhere}
+.owner-shell .oauth-mailbox-preview small{font-size:12px;color:var(--muted)}
+.owner-shell .oauth-scope-options label{align-items:flex-start;gap:10px;flex-wrap:nowrap;margin:12px 0}
+.owner-shell .oauth-scope-options input{margin-top:6px;flex-shrink:0}
+.owner-shell .oauth-scope-options span{display:grid;gap:3px}
+.owner-shell .oauth-scope-options strong{font-size:14px;font-weight:600}
+.owner-shell .oauth-scope-options small{font-size:12px}
+.owner-shell .oauth-approval{padding-top:2px;margin-bottom:24px}
+.owner-shell .oauth-approval>strong{font-size:14px;display:block;margin-bottom:8px}
+.owner-shell .oauth-direct{display:flex;align-items:flex-start;gap:9px;font-size:14px}
+.owner-shell .oauth-direct input{margin-top:6px;flex-shrink:0}
+.owner-shell .oauth-consent-actions{display:flex;justify-content:flex-end;gap:12px;border-top:1px solid var(--line);padding-top:20px;margin-bottom:14px}
+.owner-shell .oauth-consent .helper a,.owner-shell .oauth-consent .notice a{color:var(--green);text-decoration:underline;text-underline-offset:3px}
+.owner-shell .oauth-grants{display:grid;gap:22px;list-style:none;padding:0;margin:26px 0 0;max-width:1000px}
+.owner-shell .oauth-grants section .section-heading{align-items:flex-start}
+.owner-shell .oauth-grants section form{display:flex;justify-content:flex-end;padding-top:18px;border-top:1px solid var(--line)}
+@media(max-width:640px){.owner-shell .oauth-client,.owner-shell .oauth-consent,.owner-shell .oauth-grants section{padding:19px 16px}.owner-shell .oauth-metadata>div{grid-template-columns:90px minmax(0,1fr);gap:10px}.owner-shell .oauth-consent-actions{flex-wrap:wrap}.owner-shell .oauth-consent-actions button{flex:1;white-space:nowrap}.owner-shell .oauth-content .section-heading,.owner-shell .oauth-grants .section-heading{align-items:flex-start;gap:12px}.owner-shell .oauth-content h2,.owner-shell .oauth-grants h2{overflow-wrap:anywhere}}

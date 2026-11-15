@@ -1,0 +1,65 @@
+name: Deploy personal Agent Mail
+
+# Manual only: publishing code or opening a PR never deploys a personal mailbox.
+on:
+  workflow_dispatch:
+    inputs:
+      reuse_existing:
+        description: Adopt the exact existing Worker/D1/R2 names (updates or interrupted installs)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-mail-cloudflare-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+      - name: Install locked dependencies
+        run: |
+          npm install --global pnpm@11.25.0
+          pnpm install --frozen-lockfile
+      - name: Read personal configuration
+        env:
+          DEPLOY_CONFIG_JSON: ${{ vars.AGENT_MAIL_DEPLOY_CONFIG_JSON }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          node --input-type=module <<'NODE'
+          import {writeFile} from 'node:fs/promises';
+          import {validateDeploymentInput,requireDeployableInput} from './scripts/deploy/plan.mjs';
+          let config;
+          try {
+            config=validateDeploymentInput(JSON.parse(process.env.DEPLOY_CONFIG_JSON||'null'),process.env);
+            requireDeployableInput(config);
+          } catch { throw new Error('Configure AGENT_MAIL_DEPLOY_CONFIG_JSON and CLOUDFLARE_ACCOUNT_ID repository variables.'); }
+          await writeFile('deploy.config.json',JSON.stringify(config,null,2)+'\n',{mode:0o600});
+          NODE
+          pnpm deploy:plan -- --input deploy.config.json
+      - name: Check schema, core behavior and deployment failure handling
+        run: |
+          pnpm test:schema
+          pnpm test:unit
+          pnpm test:deploy
+      - name: Create resources, build, migrate and deploy one Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          REUSE_EXISTING: ${{ inputs.reuse_existing }}
+        run: |
+          if [ "$REUSE_EXISTING" = "true" ]; then
+            pnpm deploy:setup -- --input deploy.config.json --reuse-existing
+          else
+            pnpm deploy:setup -- --input deploy.config.json
+          fi
