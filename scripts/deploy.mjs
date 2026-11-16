@@ -4,11 +4,11 @@ import {deployProject} from './deploy/run.mjs';
 import {CloudflareError} from './deploy/cloudflare.mjs';
 
 try{
-  const {values}=parseArgs({args:process.argv.slice(2).filter(arg=>arg!=='--'),options:{input:{type:'string',default:'deploy.config.json'},apply:{type:'boolean',default:false},'reuse-existing':{type:'boolean',default:false},help:{type:'boolean',default:false}}});
-  if(values.help)console.log('pnpm deploy:plan -- --input deploy.config.json\npnpm deploy:setup -- --input deploy.config.json [--reuse-existing]\nDefault: offline plan. --apply creates cloud resources, migrates D1 and deploys one Worker.');
+  const {values}=parseArgs({args:process.argv.slice(2).filter(arg=>arg!=='--'),options:{input:{type:'string',default:'deploy.config.json'},apply:{type:'boolean',default:false},'reuse-existing':{type:'boolean',default:false},'use-wrangler-login':{type:'boolean',default:false},help:{type:'boolean',default:false}}});
+  if(values.help)console.log('pnpm deploy:plan -- --input deploy.config.json\npnpm deploy:setup -- --input deploy.config.json [--reuse-existing] [--use-wrangler-login]\nDefault: offline plan. --apply creates cloud resources, migrates D1 and deploys one Worker.\nLocal OAuth: run pnpm exec wrangler login, then explicitly add --use-wrangler-login. CI requires CLOUDFLARE_API_TOKEN.');
   else{
     const input=JSON.parse(await readFile(values.input,'utf8'));
-    const result=await deployProject({input,apply:values.apply,reuseExisting:values['reuse-existing']});
+    const result=await deployProject({input,apply:values.apply,reuseExisting:values['reuse-existing'],useWranglerLogin:values['use-wrangler-login']});
     console.log(JSON.stringify(result,null,2));
   }
 }catch(error){
@@ -18,6 +18,12 @@ try{
     existing_resources_require_reuse:'Verify the target account and existing Worker/D1/R2 names, then use --reuse-existing only if they belong to this instance.',
     deployment_placeholders_remaining:'Replace the example account, domains and Owner values before applying.',
     cloudflare_api_token_required:'Provide CLOUDFLARE_API_TOKEN through your local terminal or CI secret, never the Worker.',
+    wrangler_login_not_allowed:'--use-wrangler-login is local-only. CI and Workers Builds require CLOUDFLARE_API_TOKEN.',
+    wrangler_login_unavailable:'Run pnpm exec wrangler login locally, then retry with --use-wrangler-login. No credential output is included in this error.',
+    wrangler_login_timeout:'Wrangler could not resolve the login within 30 seconds. Check connectivity and retry the same deployment.',
+    wrangler_login_unsupported_credentials:'Wrangler returned API key/email credentials. Use OAuth login or provide CLOUDFLARE_API_TOKEN instead.',
+    wrangler_login_invalid_response:'Wrangler returned unexpected credential output. Check the locked Wrangler installation; no credential output is included.',
+    wrangler_login_response_too_large:'Wrangler credential output exceeded the safe limit. Check the locked Wrangler installation; no credential output is included.',
     pnpm_required:'Run this installer with pnpm 11.25.0. Other package managers can parse Wrangler arguments differently.',
     deployment_in_progress:'A deployment lock exists. Confirm the other process has stopped before removing only .agent-mail/deploy.lock.'
   };

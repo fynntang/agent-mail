@@ -68,12 +68,38 @@ test('D1 follows page metadata, filters exact names, and returns only safe ident
   for (let i = 0; i < calls.length; i++) {
     const url = new URL(calls[i].url);
     assert.equal(url.pathname, `/client/v4/accounts/${ACCOUNT}/d1/database`);
-    assert.equal(url.searchParams.get('name'), 'agent-mail');
+    assert.equal(url.searchParams.has('name'), false);
     assert.equal(url.searchParams.get('page'), String(i + 1));
     assert.equal(url.searchParams.get('per_page'), '100');
     assert.equal(calls[i].init.method, 'GET');
     assert.equal(calls[i].init.body, undefined);
   }
+});
+
+test('D1 looks up existing targets among account databases without mixing filtered results and unfiltered totals', async () => {
+  const calls = [];
+  const client = new CloudflareClient({ token: TOKEN, accountId: ACCOUNT, fetchFn: async (url, init) => {
+    calls.push({ url: String(url), init });
+    assert.equal(init.method, 'GET', 'A lookup must never create a replacement database');
+    // Actual API semantics: name filtering narrows result/count, but total_count still
+    // counts the entire account. Such a filtered short page is not missing data.
+    const filtered = new URL(url).searchParams.has('name');
+    return json(filtered ? [database()] : [database('unrelated', OTHER_ID), database(), database('agent-mail-archive', THIRD_ID)],
+      { result_info: { page: 1, per_page: 100, count: filtered ? 1 : 3, total_count: 3 } });
+  } });
+  assert.deepEqual(await client.findD1('agent-mail'), { id: ID, name: 'agent-mail' });
+  assert.equal(calls.length, 1);
+  assert.equal(new URL(calls[0].url).searchParams.has('name'), false);
+});
+
+test('D1 searches the full account through the last page before concluding an exact name is absent', async () => {
+  const { client, calls } = harness([
+    json([database('agent-mail-archive', OTHER_ID), database('archive-agent-mail', THIRD_ID)], { result_info: { page: 1, per_page: 2, count: 2, total_count: 3 } }),
+    json([database('unrelated')], { result_info: { page: 2, per_page: 2, count: 1, total_count: 3 } })
+  ]);
+  assert.equal(await client.findD1('agent-mail'), null);
+  assert.equal(calls.length, 2);
+  for (const call of calls) assert.equal(new URL(call.url).searchParams.has('name'), false);
 });
 
 test('D1 does not return a partial match or stop after first exact result', async () => {

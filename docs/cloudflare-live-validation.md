@@ -1,0 +1,43 @@
+# Cloudflare 实际部署验证
+
+验证日期：2026-11-16（Asia/Shanghai）。本记录区分真实 Cloudflare 操作与本地模拟测试；账户、Owner 邮箱、资源 ID 和管理凭据不写入公开文档。
+
+## 已验证的云端操作
+
+| 项目 | 实际操作及结果 |
+| --- | --- |
+| 账户授权 | 本机 Wrangler OAuth 登录成功；部署工具通过显式 `--use-wrangler-login` 读取官方 CLI 的授权结果，仅在内存用于控制面 |
+| D1 创建 | 使用部署工具的 Cloudflare 客户端新建专用数据库，并按 ID 回读核对 |
+| R2 创建 | 新建专用私有桶，并回读核对名称 |
+| 迁移 | CLI 对真实数据库应用全部20个迁移，最新为0020；远端只读 SQL 验证56张 STRICT 表 |
+| Worker 发布 | CLI 显式复用本次新建资源，完成检查、构建、远端迁移和单 Worker 发布 |
+| R2 内容 | Wrangler 远端上传随机探针、下载并核对字节，随后删除该探针；清理成功 |
+| 公开接口 | 浏览器实际访问 `/healthz`、`/setup` 和 OAuth 资源发现均200；页面无运行时错误 |
+| 初始权限 | 未配置 Access 时 `/owner/setup` 为503；未携带邮箱凭据的 `/mcp` 为401并带应用自身的授权提示 |
+| Access 应用 | 在已有团队新增仅覆盖 `/owner` 的 Self-hosted 应用，回读确认仅一个 Owner 邮箱的 Allow 策略 |
+| 真实 Owner 登录 | 用户在 Chrome 完成 Access 登录后，Worker 实际验证签名/issuer/AUD；Owner API 返回200、配置有效 |
+| Owner 存储探针 | 在真实 Owner 页面操作 R2 绑定的随机读写探针，验证成功且清理完成 |
+| 初始邮箱和路由 | 在真实 Owner 界面创建首个活动邮箱，为其新增 literal→Worker 规则；回读核对原规则不变 |
+| 邮件子域 DNS | 专用子域现有 MX/SPF 已匹配 Cloudflare 要求；公共 DNS 前后复查一致，本次没有写入或修改 DNS |
+| Owner 完成 | 独立验证 DNS/路由后，在真实页面完成确认；GET 再次读取为 ready、0020、一个活动邮箱，桌面/手机截图已检查 |
+| 实际 Origin 边界 | 同一真实 Access 会话读取 Owner API 为200；带其他 Origin 的写入为403 `forbidden_origin`，Owner 页控制台/运行时错误为0 |
+
+真实验证在隔离部署目录进行，开源仓库的资源占位配置保留。本机 Node 直连 workers.dev 超时，而使用系统网络配置的 Chrome 和系统 HTTP 客户端可正常访问；HTTP 结论来自后两者，不将本机直连问题归为应用故障。
+
+## 仍需完成的验收
+
+- Cloudflare 部署按钮的完整 Workers Builds 流程。本次已验证按钮跳转到正确仓库的部署入口，自动化浏览器在 Cloudflare 安全验证页停止，尚未完成该界面的登录与构建。
+- 外部真实邮件收发：本轮未实测。发送绑定保持关闭，Owner 向导未代发测试邮件。
+
+Wrangler OAuth 的实际 Access 创建请求返回403，不能替代 Access 管理权限。本次使用本机提供的独立 Access 应用/策略写权限与组织读取权限完成配置；邮件路由使用现有 Email Routing 授权。公共 DNS 已与专用服务返回的记录匹配，无需为了本次已有记录增加通用 DNS 读取或写入权限。其他实例若需新增子域 DNS，仍应按部署文档为实际操作提供相应权限。凭据只在本机提供，不放入 Worker、Wrangler变量或 Git。
+
+Owner 已在真实云端完成初始化；这不等于部署按钮的独立 Workers Builds 流程已经通过。外部真实邮件收发仍是独立验收项目。
+
+## 本轮发现并修复的问题
+
+1. D1 列表接口的 `total_count` 表示未筛选的账户总数。部署器原来按名称筛选后仍用该值判分页，账户已有其他数据库时可能错误退出。现按账户完整分页后精确匹配名称，异常分页与重名仍拒绝。
+2. 本机仅完成 Wrangler 登录时，部署器原来仍要求另外提供 API Token。现增加显式 `--use-wrangler-login`，通过公开的 `wrangler auth token --json` 获取内存凭据；离线计划不读凭据，CI仍使用 API Token。
+3. `/setup` 的文字容易被理解成 Access 配置表单。现明确它是公开说明页，说明 Cloudflare 配置、重新部署及受保护 Owner 向导的顺序，并区分同 Origin 的 `/owner` 路径保护。
+4. 两个通知单测依赖固定日期，却在真实时钟创建订阅，跨天后会制造订阅晚于事件的错误数据。现固定完整 fixture 时钟，保留静默、签名和身份断言；2000片段下载测试保留原数量/查询预算断言，并使用与规模匹配的执行时限。
+
+本地命令及最终通过数量统一记入[开发验证](development.md)，安装步骤见[部署与初始化](deployment.md)。

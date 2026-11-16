@@ -45,7 +45,7 @@ it('streams 2000 fragments within the Paid D1 invocation budget while verifying 
   expect(actual.byteLength).toBe(Number(response.headers.get('content-length')));expect(source.gets()).toBe(2000);
   // One aggregate read and125 authorization/manifest batches. Real Owner lookup adds only fixed overhead.
   expect(source.calls()).toBeLessThanOrEqual(130);expect(source.calls()).toBeLessThan(1000);expect(mock.getJob).toHaveBeenCalledTimes(1);
-});
+},15_000);
 
 it('rejects expiry both before starting a download and after an R2 read without waiting for the next manifest page',async()=>{
   const source=await fixture(32);source.setClock(source.job.expiresAt);

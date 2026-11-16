@@ -59,17 +59,21 @@ it('uses terminal state and safe error identity for repeat budgets and permits t
 });
 
 it('retains disabled and quiet receipts without replay and records absent, late and same-millisecond subscriptions safely',async()=>{
+  at=Date.UTC(2026,10,15,12);const clock=vi.spyOn(Date,'now').mockImplementation(()=>at-1);
   const mailbox=await box();await endpoint(mailbox.id);await policy(mailbox.id,{enabled:false});const fetcher=vi.fn(async()=>new Response(null,{status:204}));
   const disabled=await terminal(mailbox.id);await run(fetcher);expect(await decision(disabled)).toBe('disabled');
-  await policy(mailbox.id,{enabled:true,quietEnabled:true,quietStartMinute:0,quietEndMinute:1439,timeZone:'UTC'});at=Date.UTC(2026,10,15,12);
+  await policy(mailbox.id,{enabled:true,quietEnabled:true,quietStartMinute:0,quietEndMinute:1439,timeZone:'UTC'});
   const quiet=await terminal(mailbox.id);await run(fetcher);expect(await decision(quiet)).toBe('quiet_hours');
   await policy(mailbox.id,{quietEnabled:false});await run(fetcher);expect(fetcher).not.toHaveBeenCalled();
-  for(const delta of [0,1]){const absent=await box(),job=await terminal(absent.id),clock=vi.spyOn(Date,'now').mockReturnValue(at+delta);await endpoint(absent.id);clock.mockRestore();await run(fetcher);expect(await decision(job)).toBe('no_subscribers');}
+  for(const delta of [0,1]){const absent=await box(),job=await terminal(absent.id);clock.mockReturnValue(at+delta);await endpoint(absent.id);clock.mockImplementation(()=>at-1);await run(fetcher);expect(await decision(job)).toBe('no_subscribers');}
   expect(fetcher).not.toHaveBeenCalled();expect((await rows('async_export_notification_state')).results).toHaveLength(0);
 });
 
 it('defers retry transport during quiet time, wakes only quiet deferrals and preserves signed frozen delivery identity',async()=>{
-  const mailbox=await box();await endpoint(mailbox.id);at=Date.UTC(2026,10,15,21,59);const job=await terminal(mailbox.id),bodies:string[]=[],deliveryIds:string[]=[];
+  // Subscription and terminal clocks share one fixed timeline, independent of the host date.
+  at=Date.UTC(2026,10,15,21,59);vi.spyOn(Date,'now').mockImplementation(()=>at-1);
+  const mailbox=await box(),hook=await endpoint(mailbox.id);expect(hook.endpoint.createdAt).toBeLessThan(at);expect(hook.endpoint.updatedAt).toBeLessThan(at);
+  const job=await terminal(mailbox.id),bodies:string[]=[],deliveryIds:string[]=[];
   const fetcher=vi.fn(async(input:RequestInfo|URL,init?:RequestInit)=>{const request=new Request(input,init);bodies.push(await request.text());deliveryIds.push(request.headers.get('X-Agent-Mail-Delivery')!);return new Response(null,{status:bodies.length===1?500:204});});
   await run(fetcher);expect(await decision(job)).toBe('allowed');await policy(mailbox.id,{quietEnabled:true,quietStartMinute:1320,quietEndMinute:480,timeZone:'UTC'});at+=60000;
   await run(fetcher);expect(fetcher).toHaveBeenCalledTimes(1);expect((await rows('webhook_deliveries')).results[0]).toMatchObject({state:'pending',attempts:1,last_error_code:'alert_quiet_hours'});

@@ -2,7 +2,7 @@
 
 设计基线：2026 年 11 月 13 日。每位使用者将应用部署到自己的 Cloudflare 账户，使用自己的邮件域名、D1、R2 和密钥。一个实例只有一个 Owner，支持多个 Agent 邮箱。发布者维护开源代码，不代管使用者的邮箱或 Cloudflare 凭据。
 
-当前已实现 SvelteKit/单 Worker、D1/R2、收信解析、Owner 控制台、阅读/搜索、草稿/回复、审批发送、MCP 及 OAuth；没有远程部署。实际范围见[开发说明](development.md)、[邮件发送](mail-sending.md)、[MCP 接入](mcp.md)与[OAuth](oauth.md)。本方案替换此前多租户方案，不包含旧 PostgreSQL 数据自动迁移。
+当前已实现 SvelteKit/单 Worker、D1/R2、收信解析、Owner 控制台、阅读/搜索、草稿/回复、审批发送、MCP 及 OAuth，并完成真实账户的资源创建、迁移和单 Worker 发布验证。各阶段的验收结果及边界见[Cloudflare 实际部署验证](cloudflare-live-validation.md)；功能范围见[开发说明](development.md)、[邮件发送](mail-sending.md)、[MCP 接入](mcp.md)与[OAuth](oauth.md)。本方案替换此前多租户方案，不包含旧 PostgreSQL 数据自动迁移。
 
 配套：[SvelteKit项目结构](project-structure.md)、[数据库字典](database.md)、[API/MCP](api-mcp.md)、[部署与发布](deployment.md)、[验证记录](validation.md)。
 

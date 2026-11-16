@@ -55,7 +55,7 @@ test('Setup browser flow: public bootstrap, authenticated storage probe and pend
   await page.getByLabel('实例名称',{exact:true}).fill('Personal Agents');
   const checks=[
     '我已在 Cloudflare 确认邮件域名和 DNS，不会覆盖现有个人邮箱配置。',
-    '我已在 Cloudflare 确认控制台 Access 覆盖范围、Owner 策略和 API 域名分离。',
+    '我已在 Cloudflare 确认 Access 保护范围、Owner 策略和 Agent API 授权边界。',
     '我已在 Cloudflare 确认 Email Routing 的 DNS、地址规则和目标 Worker。',
     '我已在 Cloudflare 确认 Email Sending、发送域名、DNS 和账户发送限制。'
   ];

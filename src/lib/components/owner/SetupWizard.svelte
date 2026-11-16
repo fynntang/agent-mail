@@ -79,10 +79,10 @@
 
   <section class="setup-card" aria-labelledby="setup-access"><div class="setup-heading"><span class="setup-step" aria-hidden="true">3</span><div><h2 id="setup-access">Cloudflare Access</h2><p>Owner 页面使用 Access 登录；Agent API 与 OAuth 协议使用各自凭据。</p></div></div>
     <dl class="setup-metadata"><div><dt>Owner 邮箱</dt><dd>{setup.config.ownerEmail}</dd></div><div><dt>Access 团队</dt><dd><code>{setup.config.accessTeamDomain}</code></dd></div><div><dt>应用 AUD</dt><dd><code>{setup.config.accessAud}</code></dd></div><div><dt>控制台入口</dt><dd><code>{setup.config.consoleOrigin}</code></dd></div><div><dt>Agent API 入口</dt><dd><code>{setup.config.apiOrigin}</code></dd></div></dl>
-    <ol class="setup-instructions"><li>在 Zero Trust 的 Access Applications 创建 Self-hosted 应用，覆盖控制台域名。</li><li>Allow 策略只允许上述 Owner 邮箱；将团队域名和应用 AUD 填入部署配置。</li><li>两个域名指向同一个 Worker。API 域名的 MCP、OAuth 发现和 token 端点不能被交互式 Access 登录拦住。</li></ol>
+    <ol class="setup-instructions"><li>在 Zero Trust 的 Access Applications 创建 Self-hosted 应用。独立控制台域名可保护整个主机；与 API 共用同一地址时，应用范围使用主机的 /owner 路径及其子路由。</li><li>Allow 策略只允许上述 Owner 邮箱；将团队域名和应用 AUD 填入部署配置。</li><li>两种入口都指向同一个 Worker。Agent API、MCP、OAuth 发现和 token 端点使用各自授权，不能被交互式 Access 登录拦住。</li></ol>
     <p class="helper">当前页面已通过服务端 Owner JWT 检查；这不等于检查了所有 Cloudflare 边缘策略或备用域名。</p>
     <p><a href="https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/" target="_blank" rel="noopener noreferrer">查看 Access 配置文档 ↗</a></p>
-    <label class="setup-confirm"><input type="checkbox" bind:checked={attestations.access} disabled={!mounted||Boolean(busy)}/><span>我已在 Cloudflare 确认控制台 Access 覆盖范围、Owner 策略和 API 域名分离。</span></label>
+    <label class="setup-confirm"><input type="checkbox" bind:checked={attestations.access} disabled={!mounted||Boolean(busy)}/><span>我已在 Cloudflare 确认 Access 保护范围、Owner 策略和 Agent API 授权边界。</span></label>
   </section>
 
   <section class="setup-card" aria-labelledby="setup-routing"><div class="setup-heading"><span class="setup-step" aria-hidden="true">4</span><div><h2 id="setup-routing">Email Routing 收信</h2><p>将邮件投递到部署输出的同一个 Worker。</p></div></div>

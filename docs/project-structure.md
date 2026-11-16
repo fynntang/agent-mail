@@ -118,6 +118,7 @@ migrations/0019_retry_batch_notifications.sql 批次完成与异常通知快照
 migrations/0020_retry_batch_notification_retry_batches.sql 通知投递独立批量重试，当前56张STRICT表
 scripts/
   deploy.mjs / deploy/                本地/CI 资源预配、迁移和单 Worker 发布
+  deploy/wrangler-auth.mjs           本机显式复用Wrangler登录，内存凭据、CI拒绝与有界子进程
   sync-svelte-config.mjs              从根配置派生 adapter 配置
   seed-local.mjs                     本地邮箱与只读 Token fixture
   validate-schema.mjs                结构检查、字段字典生成
@@ -178,7 +179,7 @@ Owner `.../export-notifications/{jobId}/delivery-results` 查询绑定当前通�
 
 `/v1/*` 与 `/mcp` 验证 Bearer Token 摘要、有效期、撤销状态和邮箱 active 状态。只读 API 再检查 can_read，并固定使用认证结果中的 mailbox_id，忽略调用方传来的其他邮箱 ID。敏感响应使用 no-store；Owner 写入还必须来自 console Origin。
 
-Owner 管理界面、邮箱与 Token 生命周期已实现，详见[控制台说明](owner-console.md)。本地 fixture 由 CLI/测试生成，不暴露无认证初始化路由。Token 明文仅在签发时返回，页面加载和列表中不含明文或摘要。
+Owner 管理界面、邮箱与 Token 生命周期已实现，详见[控制台说明](owner-console.md)。本地 fixture 由 CLI/测试生成，不暴露无认证初始化路由。Token 明文仅在签发时返回，页面加载和列表中不含明文或摘要。根 `.node-version` 固定Cloudflare构建所用Node版本；真实账户的阶段结果见[部署验证](cloudflare-live-validation.md)。
 
 ## 存储与任务边界
 

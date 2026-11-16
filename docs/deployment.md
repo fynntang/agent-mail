@@ -1,224 +1,230 @@
 # 个人部署与初始化
 
-项目提供 README 部署按钮、本地一条命令部署和手动触发的 GitHub Actions。全部路径最后只部署 `worker/entry.ts` 这一个 Worker，SvelteKit、API、MCP、原生 email 和 scheduled 均在其中运行。
+Agent Mail 在你的 Cloudflare 账户中运行一个实例。Cloudflare 按钮、本地部署器和 GitHub Actions 最终都只发布 `worker/entry.ts` 这一个 Worker；SvelteKit、API/MCP、原生 email、scheduled 及可选 queue 共用 D1 和私有 R2。
 
-部署应用后，还需要在自己的 Cloudflare 账户配置 Access、邮件域名、Email Routing 和可选的 Email Sending。初始化向导区分资源检查、Owner 人工确认和应用观测记录，不把这些步骤视为已自动开通。
+部署应用、配置 Access、完成 Owner 向导和验证外部邮件收发是不同阶段。本文按实际操作顺序说明；功能使用文档见[文档索引](README.md)，实际完成的云端项目见本文末尾的[验证范围](#验证范围)。
+
+## 部署前准备
+
+准备 Cloudflare 账户、专用邮件域名及 Owner 登录邮箱。账户需启用 R2；使用 workers.dev 回退地址时，先完成账户 Workers 子域的启用。Email Sending 是可选能力，其资格、套餐和收件人限制以账户控制台为准。
+
+### 实例参数
+
+本地部署复制 [`deploy.config.example.json`](../deploy.config.example.json) 为被 Git 忽略的 `deploy.config.json`。PowerShell 使用 `Copy-Item deploy.config.example.json deploy.config.json`，其他 shell 使用 `cp`。填写实际值，不将示例域名或全零账户/数据库 ID 用于执行。
+
+| 本地配置 | Workers Builds 对应项 | 填写要求 |
+| --- | --- | --- |
+| `accountId` | `CLOUDFLARE_ACCOUNT_ID` 或 Wrangler `account_id` | 目标账户的32位 ID；本地 JSON 留空时可由同名环境变量提供 |
+| `workerName` / `databaseName` / `bucketName` | Worker 名称及 D1/R2 配置 | 本实例的明确名称；更新时保持不变。绑定名必须是 `DB` 和 `MAIL_BLOBS` |
+| `mailDomain` | `MAIL_DOMAIN` | 实际 ASCII 邮件域名；推荐专用子域，保留原个人邮箱用途 |
+| `ownerEmail` | `OWNER_EMAIL` | Access Allow 策略允许的 Owner 登录邮箱 |
+| `consoleOrigin` / `apiOrigin` | `CONSOLE_ORIGIN` / `API_ORIGIN` | 不带路径或尾斜杠的精确 HTTPS origin；留空时推导为同一 workers.dev 地址 |
+| `accessTeamDomain` / `accessAud` | `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` | 团队 issuer 与应用 AUD，必须成对填写；初次可同时留空，Owner 入口保持拒绝 |
+| `enableSending` | 构建环境 `AGENT_MAIL_ENABLE_SENDING=1` | 默认 false；确认服务资格及域名后再启用 |
+| `cimdAllowedHosts` | `OAUTH_CIMD_ALLOWED_HOSTS` | 按需允许的 OAuth Client ID Metadata 主机；默认空列表，见[OAuth](oauth.md) |
+
+部署器生成真实的根 `wrangler.jsonc`，再同步 adapter 专用 `wrangler.svelte.jsonc`。不要直接发布仓库里的占位配置，也不要单独部署 adapter 输出。公共运行变量和管理凭据应分别配置。
+
+### 凭据与权限
+
+| 用途 | 凭据和范围 |
+| --- | --- |
+| 本机部署 | 显式选择 Wrangler OAuth 登录，或提供限定目标账户的 `CLOUDFLARE_API_TOKEN` |
+| CI、Actions、Workers Builds | 通过秘密注入提供 `CLOUDFLARE_API_TOKEN`；不能使用本机登录参数 |
+| 创建/更新 Worker、D1、R2 | 一般需要账户级 D1 Write、Workers R2 Storage Write、Workers Scripts Edit/Write；workers.dev 回退还需 Account Settings Read；已有自定义 route 另需目标 zone 的 Workers Routes Write |
+| 配置 Access | 单独使用控制台，或目标账户的 `Access: Apps and Policies` Edit（API称 Write）和 `Access: Organizations, Identity Providers, and Groups` Read |
+| 启用邮件子域 DNS | 目标 zone 的 `Zone Settings Write`；读取现有记录另需 `DNS Read` |
+| 创建邮件地址规则 | 目标 zone 的 `Email Routing Rules Write` |
+
+权限名称以 Cloudflare 当前界面和接口为准。[Token 权限](https://developers.cloudflare.com/fundamentals/api/reference/permissions/)、[Workers 权限](https://developers.cloudflare.com/workers/authorization/)、[Access 应用权限](https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/applications/methods/create/)、[读取 Zero Trust 组织](https://developers.cloudflare.com/api/resources/zero_trust/subresources/organizations/methods/list/)。
+
+Wrangler OAuth 的部署授权不包含 Access 应用管理。Access 专用 Token 和部署凭据分别管理；不要用仅有 Access 权限的 Token 替换部署凭据。管理 Token 不写入部署 JSON、Wrangler `vars`、`.dev.vars`、部署状态或 Worker Secret；运行时所需 Webhook 等 Secret 另按功能配置。
 
 ## 部署按钮
 
-本仓库已公开，README 的 Cloudflare 标准按钮可克隆本仓库并建立 Workers Builds，按 Wrangler 绑定配置 D1/R2。GitHub Actions 是另一个入口：Fork 后请从自己仓库的 Actions 进入 `Deploy personal Agent Mail`，配置下文的变量及 Secret 后手动运行。[官方按钮与资源说明](https://developers.cloudflare.com/workers/platform/deploy-buttons/)
+点击[README中的Cloudflare按钮](../README.md)。按钮会克隆公开仓库并建立 Workers Builds，按 Wrangler 绑定配置 D1/R2。[官方按钮与资源说明](https://developers.cloudflare.com/workers/platform/deploy-buttons/)
 
-使用 Cloudflare 标准按钮时：
+1. 选择目标账户及 Worker、数据库、桶名称，保留 `DB` / `MAIL_BLOBS` 绑定名。账户需要已启用 R2。
+2. 填写实际 `MAIL_DOMAIN`、`OWNER_EMAIL` 和 `CLOUDFLARE_ACCOUNT_ID`；核对按钮回写的 D1 ID 和 R2 名称。标准按钮预配资源，部署脚本只使用这些资源，不再创建第二份数据库或桶。
+3. 使用 Node.js 24 和锁定的 pnpm 11.25.0。独立 **Build command 留空**；若界面要求非空，可填 `node --version`。**Deploy command** 填 `pnpm deploy:workers`，或明确调用 package 脚本的 `pnpm run deploy`。
+4. 核对构建 API Token 具有 D1 迁移、Worker 发布和所需账户查询权限。脚本内部会移除管理凭据再执行检查和构建，避免自动预填的外层 `pnpm build` 先继承构建 Token。
+5. 部署入口只在 `WORKERS_CI=1` 选择按钮路径，依次检查、构建、执行远端迁移、发布。迁移失败不上传 Worker；普通 `CI=true` 不会将本地离线计划变成部署。[Workers Builds 配置](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/)
+6. 默认关闭发送绑定。账户已开通相应服务时，再设置构建变量 `AGENT_MAIL_ENABLE_SENDING=1`。`WEBHOOK_KEYRING` 等运行时 Secret 按需配置。
+7. 打开输出的 `/setup`，继续配置 Access 和 Owner 向导。按钮会为克隆仓库启用后续构建/部署，请审阅 Workers Builds 的生产分支与自动部署设置。
 
-1. 确认源仓库公开，账户已启用 R2；在按钮界面选择 Worker、数据库与桶名称，保留 `DB` / `MAIL_BLOBS` 绑定名。
-2. 将 Wrangler 变量 `MAIL_DOMAIN` 和 `OWNER_EMAIL` 填为实际专用邮件域名、Owner 邮箱。构建环境提供 `CLOUDFLARE_ACCOUNT_ID`；若环境未自动提供，在 Workers Builds 的环境变量中填写所选账户 ID。
-3. 将独立的 Build command 留空（若界面要求非空，可填写 `node --version`），Deploy command 设为 `pnpm deploy:workers`（或 `pnpm run deploy`，明确调用package脚本）。部署脚本内会执行真正构建，先移除Cloudflare管理凭据，避免自动预填的外层 `pnpm build` 直接继承构建Token。使用 Node.js24和锁定的pnpm11。构建API Token需D1迁移、Worker发布及账户Workers子域读取权限。
-4. 按钮会提供实际 D1 ID/R2 名称；脚本验证这些绑定，拒绝全零占位 ID，使用已配置资源，不再创建第二份数据库或桶。示例 origin 会从账户 workers.dev 子域推导，实际自定义 origin 则保留。
-5. 部署入口仅在 `WORKERS_CI=1` 时选择此路径，重新检查和构建最终单Worker、按 `DB` 绑定执行远程有序迁移，再发布。迁移失败不上传Worker。本地 `pnpm run deploy` 仍是原离线计划，不因普通 `CI=true` 自动部署。[Workers Builds 环境变量](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/)
-6. 发送绑定默认关闭；账户已开通相应服务后，在构建环境设置 `AGENT_MAIL_ENABLE_SENDING=1` 再部署。`WEBHOOK_KEYRING` 等运行时 Secret 按功能需要配置，空值不会开放Owner访问；Cloudflare管理Token只用于构建控制面。
-7. 部署完成打开输出的 `/setup` 配置 Access，再进入 `/owner/setup` 核对邮件域名、路由与发送。按钮会为克隆仓库启用后续构建/部署，请在Workers Builds中审阅生产分支与自动部署设置。
-
-此路径假定已由按钮完成资源配置；普通 Git 仓库直接接入 Workers Builds 时，需要先配置实际 D1/R2 绑定。未完成资源配置可使用下文的一条命令部署器自动创建资源。当前提供的是本地模拟、构建与失败路径验证，尚未在真实Cloudflare账户完成按钮安装验收；不会因此改变仓库可见性或创建云端资源。
-
-Cloudflare按钮会将 `.dev.vars.example` 自动识别为Secret模板，因此该文件只保留注释，不提供localhost、Owner或其他默认值。完整的本地覆盖示例放在 `.dev.vars.local.example`，本地开发时复制为 `.dev.vars`；部署时公共设置来自Wrangler变量，按需启用的真实Secret在部署后另行配置，避免本地示例覆盖生产origin或Owner。
+直接将普通 Git 仓库接入 Workers Builds 时，需要先配置实际 D1/R2 绑定；没有预配资源可使用下方本地部署器创建。`.dev.vars.example` 会被按钮识别为 Secret 模板，因此仅保留注释；完整本地示例位于 `.dev.vars.local.example`，避免 localhost、Owner 等示例值覆盖生产变量。
 
 ## 本地部署
 
-需要 Node.js 24、pnpm 11.25.0、Cloudflare 账户和专用邮件域名。R2 需在账户中开通；发送功能的资格、套餐和收件人限制以账户控制台为准。
+需要 Node.js 24、pnpm 11.25.0，以及填写好的 `deploy.config.json`：
 
 ```sh
 pnpm install --frozen-lockfile
-```
-
-复制 `deploy.config.example.json` 为被 Git 忽略的 `deploy.config.json`，替换账户、域名、Owner 和资源名称。PowerShell 使用 `Copy-Item deploy.config.example.json deploy.config.json`；其他 shell 使用 `cp`。
-
-```json
-{
-  "version": 1,
-  "accountId": "你的32位Cloudflare账户ID",
-  "workerName": "my-agent-mail",
-  "databaseName": "my-agent-mail",
-  "bucketName": "my-agent-mail",
-  "mailDomain": "agent.你自己的域名",
-  "ownerEmail": "你的Owner邮箱",
-  "consoleOrigin": "",
-  "apiOrigin": "",
-  "accessTeamDomain": "",
-  "accessAud": "",
-  "enableSending": false,
-  "cimdAllowedHosts": []
-}
-```
-
-示意值必须换成实际 ASCII 域名、邮箱和账户 ID。使用示例中的占位符可以预览计划，但执行前会拒绝占位符。资源名只接受明确的字符集；账户 ID 可留空并通过本地 `CLOUDFLARE_ACCOUNT_ID` 提供。
-
-先查看离线计划：
-
-```sh
 pnpm deploy:plan -- --input deploy.config.json
 ```
 
-计划不访问 Cloudflare、不创建资源、不写部署状态、不需要 Token。准备执行时，通过终端或 CI 的秘密注入方式设置 `CLOUDFLARE_API_TOKEN`，然后运行：
+离线计划不访问 Cloudflare、不创建资源、不写部署状态，也不要求凭据。检查目标账户、名称和参数后，选择本机登录部署：
+
+```sh
+pnpm exec wrangler login
+pnpm deploy:setup -- --input deploy.config.json --use-wrangler-login
+```
+
+部署器通过受支持的 Wrangler CLI 获取登录凭据，只保存在控制面进程内存中，不解析凭据文件、不输出 Token。`--use-wrangler-login` 需要显式选择，CI 和 Workers Builds 会拒绝它；已有 `CLOUDFLARE_API_TOKEN` 环境变量时优先使用该 Token。
+
+使用专用 API Token 时，先通过本地终端的秘密注入方式设置 `CLOUDFLARE_API_TOKEN`，再运行：
 
 ```sh
 pnpm deploy:setup -- --input deploy.config.json
 ```
 
-这条命令会实际创建云资源、运行远程迁移并发布。不要将管理 Token 写入 JSON、Wrangler `vars`、`.dev.vars` 或 Worker secret。部署器只在控制面调用、远程迁移和最终发布时使用它；类型检查和打包子进程会移除已知的 Cloudflare 认证环境变量，日志也会遮盖这些凭据。
+两种执行方式都会实际创建云资源、迁移并发布。类型检查和打包子进程移除已知 Cloudflare 认证环境变量；只有控制面调用、远程迁移和最终发布使用部署认证，日志会遮盖凭据。
 
-API Token 限定到目标账户，包含创建/查询 D1、R2、查询/发布 Workers 的权限。一般对应 Account 级 D1 Write、Workers R2 Storage Write、Workers Scripts Edit/Write；使用 workers.dev 回退地址还需要读取账户 Workers 子域的权限（Account Settings Read）。保留自定义 Worker route 的配置时，另需该 zone 的 Workers Routes Write。具体名称以 Cloudflare 当前权限界面和接口要求为准。[Token 权限](https://developers.cloudflare.com/fundamentals/api/reference/permissions/)、[Workers 权限](https://developers.cloudflare.com/workers/authorization/)。部署器不申请或使用 DNS、Access 管理权限。
+执行顺序为：校验配置及同名资源 → 创建/核对 D1、R2并记录 ID → 写入实际绑定 → `pnpm check` 和 `pnpm build:worker` → `wrangler d1 migrations apply DB --remote --config wrangler.jsonc` → 发布一个 Worker并输出初始化地址。
 
-执行顺序固定为：
+## GitHub Actions
 
-1. 校验输入和单 Worker 模板，检查同名 Worker、D1、R2。
-2. 创建缺失资源，逐个记录已确认的 ID；不因超时自动重试创建请求。
-3. 将真实绑定写入根 `wrangler.jsonc`，同步生成 adapter 专用配置。
-4. `pnpm check`、`pnpm build:worker`，验证最终 bundle；此时只做 dry-run。
-5. `wrangler d1 migrations apply DB --remote --config wrangler.jsonc`。
-6. `wrangler deploy --config wrangler.jsonc`，只上传一个 Worker，并输出初始化地址。
+Fork 后在**自己的仓库**配置下列值，而不是在上游仓库运行个人部署：
 
-迁移从 `0001_initial.sql` 按文件顺序执行，当前最新为 `0020_retry_batch_notification_retry_batches.sql`，共56张 STRICT 表。初始化、OAuth、附件、Webhook、投递事件、本地及 Cloudflare 抑制、执行历史、告警、通知策略、查询索引、异步导出、终态通知及批量重试均使用增量迁移；部署工具会应用全部待执行文件。已有数据和旧版排队发送保持兼容；旧凭据不会自动获得收件附件权限，草稿附件沿用 mail:draft。
+| 设置 | 内容 |
+| --- | --- |
+| Repository variable `AGENT_MAIL_DEPLOY_CONFIG_JSON` | 完整实例 JSON，可不含 accountId |
+| Repository variable `CLOUDFLARE_ACCOUNT_ID` | JSON 未提供时的目标账户 ID |
+| Repository secret `CLOUDFLARE_API_TOKEN` | 目标账户的部署凭据 |
 
-`wrangler.svelte.jsonc` 由根配置生成，只供 SvelteKit adapter 读取；禁止单独部署。部署工具保留明确配置过的 HTTP routes，但不自动创建域名/DNS、Email Routing 或 Access 策略。带 `addresses`、额外 DB/R2、其他环境或自定义 build 的模板会拒绝，避免在不了解其含义时覆盖复杂部署。
+进入 Actions → `Deploy personal Agent Mail` → Run workflow。初次创建保留 `reuse_existing=false`；更新或中断后重跑时，核对资源名称后显式选择 true，因为新的 GitHub runner 没有之前的本地归属状态。
 
-原生部署和 adapter 都必须保留 `nodejs_compat`、`global_fetch_strictly_public`。后者保证远程资源的全局 fetch 按公共 Internet 路由处理，即使目标在自己的 Cloudflare zone 也不会绕过 Worker 或边缘安全设置直达私有源站。部署工具会为旧配置补齐标记并保留其他显式标记；构建配置同步拒绝缺失标记或反向的 `global_fetch_private_origin`。远程图片只使用受约束的全局 fetch，不调用 ASSETS 或服务绑定。[Cloudflare 兼容性标记说明](https://developers.cloudflare.com/workers/configuration/compatibility-flags/#global-fetch-strictly-public)
+工作流 `.github/workflows/deploy.yml` 仅手动 `workflow_dispatch` 触发，push/PR 不自动部署。并发组防止同仓库同时发布，凭据只注入最终部署步骤，不写仓库或运行时。Cloudflare 按钮建立的 Workers Builds 自动部署与此工作流分别管理。
 
 ## 首次进入与 Access
 
-两个 origin 留空时，部署器查询现有的账户 workers.dev 子域，为两者生成相同的 Worker 地址。需要先在 Cloudflare 为账户启用 Workers 子域。没有 Access 参数时仍可部署应用，但所有 Owner 页面和接口保持拒绝访问；没有“首访认领”或未认证初始化写入口。
+两个 origin 留空时，部署器查询账户 Workers 子域，为控制台和 API 使用同一 workers.dev 地址。没有有效 Access 参数时可以先发布应用，但所有 Owner 页面和 API 仍拒绝访问，没有“首访认领”或匿名初始化写入口。
 
-公开 `/setup` 仅给出通用接入说明，不查询或展示 Owner、域名、数据库 ID、Access AUD、邮件或 Token。它可以在 Owner 尚无法登录时提供引导。
+公开 `/setup` 只提供静态接入说明，不创建 Access 应用、不写部署变量或实例设置，也不展示当前 Owner、邮件域名、数据库 ID、AUD 或 Token。已经完成资源创建和发布的实例直接继续配置 Access，复用已有 Worker、D1 和 R2。
 
-配置 Access：
+### 选择保护范围
 
-1. 在 Zero Trust → Access → Applications 创建 Self-hosted 应用，Allow 策略只允许 `ownerEmail`。
-2. 将团队 issuer（如 `https://你的团队.cloudflareaccess.com`）和应用 AUD 写入 `accessTeamDomain`、`accessAud`；两项必须一起填写。
-3. 推荐使用独立控制台和 API 域名，并将两个域名绑定到**同一个 Worker**。在配置中填入不带路径/尾斜杠的精确 HTTPS origin。
-4. Access 保护控制台入口；API 域名的 MCP、OAuth 发现、注册和 token 端点需要公开到客户端，由应用验证相应凭据。若暂时共用一个 origin，Access 应用仅覆盖 `/owner` 及其子路径，不能整站拦截 MCP/OAuth。
-5. 再次运行 `deploy:setup` 更新配置，访问 `/owner/setup`。Worker 验证 JWT 签名、issuer、audience、有效期和 Owner 邮箱；仅注入身份头不能登录。
+在 Zero Trust → Access → Applications 创建 **Self-hosted** 应用，Allow 策略只允许部署参数中的 Owner 邮箱。不要直接选 Workers 面板的 **Protect this Worker**：Worker 级 Access 会保护该 Worker 的所有入口和域名，包括 Agent 所需的公开协议入口。
 
-自定义域名的绑定由部署者在 Workers Domains & Routes 中完成，配置中的 URL 不会自动创建 DNS 记录。更新时保持 Worker 和资源名称不变，以便复用本地已确认的资源。
+| 入口方式 | Access 覆盖范围 | 部署参数 |
+| --- | --- | --- |
+| 同一个 workers.dev origin | 应用域名填写 `<worker>.<account-subdomain>.workers.dev/owner` | 两个 origin 都填该主机的精确 HTTPS 地址 |
+| 两个自定义域名 | 仅覆盖控制台主机名 | 分别填写控制台/API origin，两个主机均绑定同一 Worker |
 
-Access 控制台名称和位置可能变化，配置依据[官方 Self-hosted 应用说明](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/)。
+父路径 `/owner` 的子路径继承策略，包括 Owner API 和 OAuth 同意页。`/owner/*` 不覆盖父路径 `/owner`，因此这里使用不带通配符的父路径。`/v1`、`/mcp`、OAuth 发现、注册和 token 端点由应用验证邮箱凭据，不应跳转到 Access 交互登录。还需核对账户中已有的 Worker级/账户级 Access 规则是否覆盖本实例，保留无关 Worker 的策略。[Workers Access 范围](https://developers.cloudflare.com/workers/configuration/cloudflare-access/)、[路径继承规则](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/app-paths/)。
+
+### 保存参数并重新部署
+
+1. 记录团队 issuer `https://<team>.cloudflareaccess.com` 和应用 Audience（AUD）。边缘 Allow 策略不能替代 Worker 内的 JWT 校验。
+2. 本地部署将 `accessTeamDomain`、`accessAud` 成对写入私有 `deploy.config.json`，核对 Owner 及两个 origin；使用原认证方式重新运行 `deploy:setup`。保持账户、Worker、D1、R2 名称不变，复用已确认资源。
+3. Workers Builds 部署将 `ACCESS_TEAM_DOMAIN`、`ACCESS_AUD`、`OWNER_EMAIL`、`CONSOLE_ORIGIN`、`API_ORIGIN` 保存到克隆仓库实际 Wrangler 配置，再重新发布。仅改控制台运行变量可能被下一次源码部署覆盖，应保持部署来源一致。
+4. 自定义域名需在 Workers Domains & Routes 绑定；填写 origin 本身不会创建域名或 DNS。
+5. 通过 Access 登录 `/owner/setup`。Worker 检查真实 JWT 签名、issuer、audience、有效期及 Owner 邮箱；邮箱 Token/OAuth Agent 授权不能进入向导。
+
+验证时，未登录的 Owner 页面应被 Access 拦截，已登录页面正常加载，跨 Origin 写入被拒绝。无邮箱凭据的 `/mcp` 应返回应用自己的401和 OAuth challenge，而非 Access 登录页。入口配置依据[官方 Self-hosted 说明](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/)。
 
 ## Owner 初始化向导
 
-`/owner/setup` 复用现有 Access 认证与写请求 Origin 校验。页面分为：
+`/owner/setup` 显示当前部署参数，保存实例名称和 Owner 确认。修改 Access、域名或 origin 仍需更新部署配置并重新发布。
 
-| 步骤 | 应用执行或显示 | Owner 需要确认 |
+| 步骤 | 应用检查或显示 | Owner 确认 |
 | --- | --- | --- |
-| 资源与迁移 | 检查所有预期表/列、显示结构版本，R2 head；显式按钮进行随机对象 put/get/delete | 缺少迁移时从部署端运行迁移 |
-| 邮件域名 | 当前 MAIL_DOMAIN | DNS 托管、专用域用途及现有 MX 的影响 |
-| Access | 当前 Owner、issuer、AUD 和两个 origin | 边缘保护范围、Allow 策略、备用域名 |
-| Email Routing | 实例来信持久化数量 | 域名接入、DNS、地址规则指向当前 Worker |
-| Email Sending | 是否存在 EMAIL 绑定、已被发送服务接受的数量 | 发送域名、DNS、账户资格及限制 |
-| Agent 邮箱 | 启用邮箱数、管理入口和 API/MCP URL | 创建邮箱、签发最小权限 Token 或授权 OAuth |
-| 完成 | 保存实例名称及确认；重新验证 R2 读写 | 继续做真实收发验收 |
+| 资源与迁移 | 最新结构、表/列/索引、R2 head；显式按钮执行随机对象 put/get/delete | 缺少迁移时从部署端执行 |
+| 邮件域名 | 当前 MAIL_DOMAIN | 专用域用途、DNS托管及现有 MX影响 |
+| Access | Owner、issuer、AUD 和两个 origin | Allow策略、边缘范围和备用域名 |
+| Email Routing | 实例来信持久化数量 | 域名、DNS、地址规则指向同一 Worker |
+| Email Sending | EMAIL绑定及被服务接受的数量 | 域名、DNS、账户资格及限制 |
+| Agent 邮箱 | 启用邮箱数量和 API/MCP入口 | 创建首个邮箱，签发最小权限凭据 |
+| 完成 | 保存确认并重新检查 R2读写 | 独立外部收发仍需实际验收 |
 
-GET 检查不创建实例设置、不写探针、不发邮件、不修改云端配置。读写探针和完成动作必须由 Owner 显式发起；随机探针会在 finally 中尝试清理，清理失败单独报错。
+GET检查不创建设置、不写探针、不发邮件或修改云端配置。R2探针和完成动作由 Owner 显式发起；随机探针会尝试清理，清理失败单独报错。完成需要有效部署参数、完整迁移、R2可读写、至少一个活动邮箱及所有适用确认；未绑定 EMAIL 时不要求发信确认。
 
-完成条件是部署参数有效、迁移完整、R2 可读写、至少一个启用邮箱，以及所有适用的 Owner 确认；未绑定 EMAIL 时不要求发信确认。`ready` 是向导记录完成状态，不作为外部邮件投递成功的证明，也不会绕过邮箱 Token 或发送审批。
+`ready` 是向导记录完成状态，不等于外部邮件已送达。配置指纹和实例版本保护保存操作：Owner、域名、Access、origin或发送绑定变化会使旧确认失效，旧页面返回409，刷新后重新核对。数据库不可用时页面显示诊断，不在向导内执行迁移。
 
-保存使用实例版本和当前部署配置指纹检查。并发旧页面返回 409；域名、Owner、Access、入口地址或发送绑定发生变化时，旧确认失效，旧页面提交也会拒绝。刷新并按新配置重新确认。数据库不可访问或结构缺失时，Owner 向导仍能显示诊断，不在页面中执行迁移。
+接口为 `GET/POST /owner/api/setup`、`POST /owner/api/setup/probe`，保留只读 `/owner/api/setup/checks`。写请求继续要求 Owner JWT和精确Origin；底层对象或数据库错误不会原样输出。
 
-接口为 `GET/POST /owner/api/setup` 和 `POST /owner/api/setup/probe`；保留只读兼容检查 `/owner/api/setup/checks`。POST 复用 Owner JSON/Origin 验证，错误不包含底层数据库或对象内容。
+## 邮件域名与收发
 
-## 邮件收发配置
+按 Cloudflare Email Service 为专用邮件域名提供的记录配置 DNS。操作前核对现有 MX用途，保留原个人邮箱；向导不会替代DNS、路由或服务开通。[域名配置](https://developers.cloudflare.com/email-service/configuration/domains/)
 
-在 Cloudflare Email Service 接入专用邮件域名，按控制台提供的验证记录配置 DNS。先确认现有 MX 用途，避免替换已有个人邮箱。参考[域名配置](https://developers.cloudflare.com/email-service/configuration/domains/)。
+Email Routing规则的 action 指向已发布的 Worker名称，由同一 Worker的原生 `email` handler接收，没有HTTP收信URL。未知或停用邮箱会拒收；部署器不提交 `addresses: []`，也不修改已有邮件路由。[收信接入](https://developers.cloudflare.com/email-service/get-started/route-emails/)、[地址规则](https://developers.cloudflare.com/email-service/configuration/email-routing-addresses/)。
 
-Email Routing 的地址规则应指向部署输出的 Worker 名称，由该 Worker 的原生 `email` handler 接收；不存在 HTTP 收信 URL。只路由已创建的 Agent 地址，未知/停用地址会拒收。Catch-all 会扩大接收范围；父域规则不等于子域规则。部署器不提交 `addresses: []`，也不会更改已有路由。[收信接入](https://developers.cloudflare.com/email-service/get-started/route-emails/)、[地址规则](https://developers.cloudflare.com/email-service/configuration/email-routing-addresses/)。
+### 专用邮件子域
 
-默认 `enableSending:false`，生成配置不包含 EMAIL 绑定，可先接入收信。需要发信时：
+例如让 `agent.example.com` 收信并保留 `example.com` 原邮箱服务，先在 Email Routing → Settings → Subdomains 添加子域。操作前后核对父域 MX，不启用或更改父域 catch-all。
 
-1. 在 Cloudflare 开通 Email Sending，接入发送域名；使用官方提供的 SPF/DKIM 等记录，按域名用途配置 DMARC。
-2. 确认账户套餐、收件人和事务邮件限制。绑定存在不等于已获准任意收件人发送。
-3. 将 `enableSending` 改为 true 并重新部署；返回向导确认新配置。
-4. 在已有“草稿与发送”页面显式提交测试邮件，沿用邮箱权限、配额和 Owner 审批。向导不会自动发信。
+API使用父域的 zone ID，但DNS启用请求必须显式指定邮件子域全名：
 
-Email Sending 接受提交与最终送达是两个状态；应用观测计数可能包含本地模拟数据，不能替代从独立外部邮箱收信和实际收件人验收。[发信接入](https://developers.cloudflare.com/email-service/get-started/send-emails/)、[发送绑定](https://developers.cloudflare.com/email-service/configuration/send-bindings/)、[资格与限制](https://developers.cloudflare.com/email-service/reference/faq/)、[价格](https://developers.cloudflare.com/email-service/platform/pricing/)。
+```text
+POST /zones/{zone_id}/email/routing/dns
+Content-Type: application/json
 
-## 中断恢复与已有实例
-
-`.agent-mail/deploy-state.json` 保存账户、资源标识和最后完成的阶段，不保存管理 Token；`wrangler.before-deploy.jsonc` 保存第一次修改前的根配置。这些文件与个人部署 JSON 均被 Git 忽略。不要将个人运行配置作为公开产物分享。
-
-相同配置再次执行会核对状态记录中的资源，不重新创建。构建失败不会迁移，迁移失败不会发布；任何阶段失败都保留已确认资源，不自动删除 D1/R2 或尝试倒退迁移。
-
-若存在同名资源但没有本地归属记录，默认在创建任何资源前停止。核对目标账户、资源名和用途后，可显式接入：
-
-```sh
-pnpm deploy:setup -- --input deploy.config.json --reuse-existing
+{"name":"agent.example.com"}
 ```
 
-此选项会更新同名 Worker 并对同名数据库执行迁移，只用于自己确认属于该实例的资源。记录中的 ID 消失或名称变化时会拒绝，不能靠此选项悄悄重建。资源创建请求超时、最终发布响应丢失时，先在 Cloudflare 确认结果；不会自动重试不确定的创建/删除动作。
+不要省略 `name` 或发送空请求体，否则该端点针对父域启用 Email Routing。按实际返回记录核对子域 MX/SPF，不替换父域记录。该端点需要目标zone的 `Zone Settings Write`；读取原记录另需 `DNS Read`。`GET /email/routing/dns` 的 `subdomain` 参数已废弃，携带时返回结构不同，不能按默认数组解析。[子域接入](https://developers.cloudflare.com/email-service/configuration/subdomains/)、[DNS启用API](https://developers.cloudflare.com/api/resources/email_routing/subresources/dns/methods/create/)、[DNS查询API](https://developers.cloudflare.com/api/resources/email_routing/subresources/dns/methods/get/)。
 
-部署锁 `.agent-mail/deploy.lock` 防止同目录并发操作。正常结束会释放；进程崩溃时先确认没有部署进程，再手动移除这个文件。不要清空资源或状态目录来处理锁。
+子域不支持 catch-all；为每个已创建的 Agent地址分别建立 literal规则：
 
-升级前独立备份 D1、R2 和运行配置。迁移只追加，不修改已发布文件；Worker 回滚不会回滚数据库。D1 Time Travel 不覆盖 R2。不要将旧快照作为已有实例的迁移，也不要在恢复数据库后自动重发已接受或结果未知的邮件。
+```text
+POST /zones/{zone_id}/email/routing/rules
+```
 
-## GitHub 一键运行
+```json
+{
+  "enabled": true,
+  "source": "api",
+  "matchers": [{"type": "literal", "field": "to", "value": "assistant@agent.example.com"}],
+  "actions": [{"type": "worker", "value": ["my-agent-mail"]}]
+}
+```
 
-仓库提供 `.github/workflows/deploy.yml`，仅 `workflow_dispatch`，不会因为 push/PR 自动部署。发布或 fork 后，在自己的仓库配置：
+替换成实际邮箱与同一 Worker名称。创建前核对该地址已有规则，增加邮箱时同步增加对应规则；需要 `Email Routing Rules Write`。这里使用 Worker action，接收邮箱独立于 Owner个人邮箱。[规则API](https://developers.cloudflare.com/api/resources/email_routing/subresources/rules/methods/create/)。
 
-- Repository variable `AGENT_MAIL_DEPLOY_CONFIG_JSON`：上述个人 JSON 内容，可以不含 accountId。
-- Repository variable `CLOUDFLARE_ACCOUNT_ID`：账户 ID（JSON 中已有时可省略）。
-- Repository secret `CLOUDFLARE_API_TOKEN`：目标账户的部署凭据。
+### 可选发送
 
-在 Actions → Deploy personal Agent Mail → Run workflow 点击运行。初次创建保持 `reuse_existing=false`；GitHub runner 没有上次本地状态，更新或中断后继续时，需要核对名称后显式选择 true。并发组防止同仓库同时发布，凭据仅注入最终部署步骤，既不写仓库也不放入运行时。
+默认 `enableSending:false`，生成配置不含 EMAIL绑定，可先完成收信接入。发信时先开通 Email Sending、接入发送域名并配置官方 SPF/DKIM等记录，按用途设置 DMARC；确认套餐及收件人限制后，改 `enableSending:true` 并重新部署，再回向导核对新配置。
 
-README 已提供标准Cloudflare按钮及本仓库Actions入口。公开源仓库可通过标准按钮开始部署；也可Fork后从自己的Actions运行已配置的部署工作流。按钮入口和部署失败处理经过本地模拟，但尚未在真实Cloudflare账户完成安装验收；生产使用建议固定已审阅版本。Cloudflare预配不替代邮件或Access接入。[Deploy 按钮](https://developers.cloudflare.com/workers/platform/deploy-buttons/)、[Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/)。
+实际测试邮件从“草稿与发送”显式提交，沿用邮箱权限、配额及 Owner审批，向导不会自动发信。服务接受提交与最终送达是两个状态，观测计数不能替代独立收件人验收。[发信接入](https://developers.cloudflare.com/email-service/get-started/send-emails/)、[发送绑定](https://developers.cloudflare.com/email-service/configuration/send-bindings/)、[资格限制](https://developers.cloudflare.com/email-service/reference/faq/)、[价格](https://developers.cloudflare.com/email-service/platform/pricing/)。
 
-## 开源发布与卸载
+### 可选集成
 
-发布时一并提供固定 tag、锁定依赖、迁移、部署 JSON 示例和验收记录。维护者需确定并添加许可证、贡献说明和实际可用的安全报告渠道；不把未实现的导出/恢复能力列为已有功能。默认无中心化账户、强制回连或管理凭据托管。
+| 能力 | 额外配置 |
+| --- | --- |
+| Webhook | 本地生成私有包装密钥，用 `wrangler secret put WEBHOOK_KEYRING` 配置；密钥轮换和至少一次投递见[Webhook](webhooks.md) |
+| 投递事件 | 发信域的 Event Subscription、专用 Queue、来源 allowlist和同一 Worker consumer；HTTP桥接可另配HMAC。部署器保留已验证consumer，不创建Queue/订阅，见[投递事件](email-delivery-events.md) |
+| Cloudflare抑制管理 | 普通变量 `EMAIL_SUPPRESSIONS_ACCOUNT_ID` / `EMAIL_SUPPRESSIONS_DOMAIN`，专用 `EMAIL_SUPPRESSIONS_API_TOKEN` Secret限定目标账户的 Email Sending Edit，见[抑制配置](cloudflare-suppressions.md) |
 
-卸载由部署者在自己的账户中处理：先暂停收发并备份数据，再删除本实例的 Worker、D1、R2，清理自己创建的邮件路由与 Access 应用。部署器不提供自动递归删除，不触碰共享域名或无关资源。
-## 可选 Webhook
+本地退信/投诉抑制、告警、异步导出和通知重试均复用既有 D1/R2。按序迁移后即可使用相应功能，不需再按每篇历史功能说明重复建表；容量及套餐边界见各功能文档。
 
-升级时应用 `0006_webhooks.sql`；部署工具会执行待迁移文件，继续发布同一 Worker。需要通知时，在本地运行 `node scripts/generate-webhook-keyring.mjs` 生成私有包装密钥，并通过 `wrangler secret put WEBHOOK_KEYRING` 配置；不要放入 wrangler vars 或源码。密钥缺失时收发邮件继续可用，Owner Webhook 页面会提示配置。密钥轮换、验证示例和至少一次投递语义见[Webhook 配置](webhooks.md)。
+## 升级、中断恢复与卸载
 
-## 可选 Email Sending 投递事件
+迁移从0001顺序执行至当前 `0020_retry_batch_notification_retry_batches.sql`，共56张 STRICT表。部署器只应用待执行文件，保留原数据；不要修改已发布迁移或将参考快照用于已有实例。升级前独立备份 D1、R2及运行配置；Worker回滚不会回滚数据库，D1 Time Travel也不覆盖R2。
 
-应用 `0007_email_delivery_events.sql`，为发信域名配置 Event Subscription、专用 Queue 和同一 Worker consumer。配置五项 EMAIL_EVENT 来源 allowlist；自建 HTTP 转发器可另配 HMAC secret。部署工具保留经过验证的专用 consumer，仍只发布一个 Worker；不会自动创建 Queue 或订阅。步骤、签名协议及真实云端验收边界见[投递事件配置](email-delivery-events.md)。
+`.agent-mail/deploy-state.json` 保存账户、资源标识和最后确认阶段；`.agent-mail/wrangler.before-deploy.jsonc` 保存首次修改前的根配置，均不保存Token且被Git忽略。相同配置重跑会核对已记录资源。构建失败不迁移，迁移失败不发布，失败不会自动删除资源或倒退数据库。
 
-## 退信与投诉抑制
+同名资源没有本地归属记录时，部署器会在创建任何资源前停止。核对账户、名称、用途后，可显式接入已有实例：
 
-应用 `0008_recipient_suppressions.sql`；不新增绑定或 secret。已校验的 hard 退信和投诉会创建邮箱级名单，所有发送入口在入队及提交前检查。Owner 可查看、分页并按版本解除；Agent 只有已提交候选地址的只读检查。迁移补齐可信历史投诉，旧 bounced 不推断为永久退信。本地解除与 Cloudflare 自身名单独立，操作及升级语义见[抑制名单](recipient-suppressions.md)。
+```sh
+pnpm deploy:setup -- --input deploy.config.json --reuse-existing --use-wrangler-login
+```
 
-## 可选 Cloudflare 服务端名单管理
+使用API Token时省略登录参数。此操作会更新同名Worker并迁移同名数据库；记录中的ID消失或名称变化会拒绝，不能用该选项悄悄重建。创建请求超时或发布响应丢失时，先在Cloudflare核对结果，不盲目重复创建。
 
-应用 `0009_cloudflare_suppressions.sql`。设置 EMAIL_SUPPRESSIONS_ACCOUNT_ID 与 EMAIL_SUPPRESSIONS_DOMAIN 普通 vars，通过 `wrangler secret put EMAIL_SUPPRESSIONS_API_TOKEN` 配置仅目标账户 Email Sending: Edit 的专用 Token。Owner 页查看、同步、解除 read_only=false 的记录，并可选择按版本联动当前邮箱本地记录。scheduled 每15分钟同步，仍只部署同一个 Worker；部署工具不创建管理 Token、不接收或托管该凭据。详见[配置与解除协议](cloudflare-suppressions.md)。
+部署锁 `.agent-mail/deploy.lock` 防止同目录并发。崩溃后先确认部署进程已停止，再只移除该锁文件，不清空状态目录或资源。原生及adapter配置必须保留 `nodejs_compat`、`global_fetch_strictly_public`；远程图片继续经过公共Internet安全边界。[兼容性标记](https://developers.cloudflare.com/workers/configuration/compatibility-flags/#global-fetch-strictly-public)
 
-## 执行历史与安全重试
+部署器保留明确配置的HTTP routes，但不自动创建自定义域名/DNS、邮件路由或Access策略。额外DB/R2、其他环境、自定义build或无法识别的复杂模板会被拒绝，以免覆盖无关部署。恢复后不要自动重发已接受或结果未知的邮件。
 
-应用 `0010_cloudflare_suppression_history.sql`；不新增绑定或 Secret。Owner 可在同页查看同步/解除执行及原失败原因，对未知删除结果进行只读 GET 核对，再按服务端资格明确提交新重试。重试记录保留父子关系，本地新风险受 CAS 保护；查看历史不要求 API Token 在线。升级会保留原解除快照，未曾记录的旧同步不可重建。详见[执行历史](cloudflare-suppression-history.md)。
+发布版本应包含许可证、锁文件、迁移、部署示例和验收记录。卸载由部署者在自己的账户处理：暂停收发、备份后清理本实例Worker/D1/R2及自己创建的路由和Access应用，保留共享域名及无关资源；部署器不提供自动递归删除。
 
-## 抑制操作告警
+## 验证范围
 
-应用 `0011_cloudflare_suppression_alerts.sql`；不新增绑定或 Secret。Owner 控制台提醒失败和未知结果，支持确认已知悉、查看关联历史及实际恢复；升级边界以前的故障不会补发。需要外部通知时在现有邮箱 Webhook 订阅中选择两个告警类型，复用 `WEBHOOK_KEYRING`、HMAC、重试及记录。详见[告警配置与权限](cloudflare-suppression-alerts.md)。
+| 项目 | 验收范围与证据 |
+| --- | --- |
+| 部署工具与失败恢复 | 已有本地模拟与回归覆盖；命令和结果见[开发记录](development.md) |
+| 本地部署器实际云端路径 | 已创建D1/R2、完成20个远端迁移、发布单Worker，并完成R2读写探针 |
+| Cloudflare按钮/Workers Builds完整安装 | 真实按钮入口与构建结果分别记录，不能用本地部署成功替代 |
+| Access及Owner向导 | 实际Access授权、JWT/Origin检查和Owner完成流程单独验收，不能仅以资源已部署判定通过 |
+| 邮件域名及外部收发 | DNS、地址规则、服务接受和外部送达分别验收；向导ready不代替收发结果 |
 
-应用 `0012_alert_notification_policies.sql` 可按邮箱设置开关、静默窗口、限频和恢复通知。旧安装默认保持开启/不限频，无新增 Secret；关闭会取消未完成告警投递，静默暂缓已有队列。详见[通知策略](alert-notification-policy.md)。
-
-应用 `0013_alert_notification_decision_indexes.sql` 增加原因分页及事件投递索引，Owner 可查询通知决策、降噪统计和关联投递详情。初始化检查会验证索引归属和列序，并列出缺少/不完整索引；该迁移完成后仍为47张表，无新增绑定或凭据。详见[决策记录与统计](alert-notification-decisions.md)。
-
-同步通知决策 CSV/JSON 导出复用0013结构，仍由同一个 Worker 的 Owner API 提供只读下载，保留原有数量和文件大小上限；数量、权限及文件格式见[导出说明](alert-notification-export.md)。
-
-大批量导出应用 `0014_async_alert_notification_exports.sql`，增加任务与分片清单两表，完成后共49张表。继续复用 `DB`、私有 `MAIL_BLOBS` 和现有 scheduled，无需新增 Worker、公开 R2 下载或外部导出服务。Owner 在通知决策页创建后台 CSV/JSON，查看进度、取消和下载；创建/取消要求 Access 与匹配 Origin，下载逐次校验 Owner、邮箱、任务状态及有效期，过期立即拒绝并由后台清理临时分片。详细容量、时效及故障恢复见[异步导出](async-alert-notification-export.md)。
-
-异步导出的最大规模（10万决策/100万投递/256 MiB）按 Workers Paid 的 D1、内部子请求及 CPU 预算设计。Free 不能保证最大规模生成及单次下载；清单查询已按16片合并，具体预算及官方限制链接见上述异步导出文档。升级代码不会自动变更账户套餐或创建新计费资源。
-
-完成/失败通知应用 `0015_async_export_notifications.sql`，增加终态通知和独立限频状态两表，完成后共51张表。终态快照与任务状态在同一事务保存，不回填升级前已结束的任务；取消和过期不产生完成/失败提醒。控制台提醒与确认不依赖 Webhook 凭据，确认只表示已知悉。外部通知选择 `alert_notification.export.succeeded` / `alert_notification.export.failed`，复用原有 `WEBHOOK_KEYRING`、HMAC、重试和邮箱通知开关/静默/限频；完成不受恢复通知开关控制。
-
-仍由同一个 scheduled 先处理既有 Webhook，再执行导出及每轮最多20条终态事件投影，新事件由下一轮有界发布和投递。订阅必须在终态前创建且最后配置时间严格早于终态时间；同毫秒或终态后更改的订阅保守不补发。通知仅 Owner 可查看及确认，原抑制决策统计及同步/异步文件格式保持原样。详见[导出完成与失败通知](async-export-notifications.md)。
-
-投递结果追踪应用 `0016_export_notification_delivery_history.sql`，仅为既有审计增加 `audit_resource_history` 索引，仍为51张表，无新绑定或凭据。Owner 可查看决定、跳过原因、发布进度、投递状态、最多80次尝试及10条手动重试审计；无凭据仍可只读查询。手动重试要求活动邮箱/端点、当前通知开启且非静默、已准入的dead投递、剩余预算及有效冻结凭据；操作UUID与版本防止重复排队。通用重试入口同样约束导出事件，原跳过决定、限频准入和文件到期时间不改变。详见[导出通知投递追踪](async-export-notification-deliveries.md)。
-
-批量重试应用 `0017_export_notification_retry_batches.sql`，增加持久批次和逐项结果两表，当时共53张表，不新增绑定或发送通道。Owner 按当前邮箱、失败时间半开窗口（最多31天）和安全原因预览最多1000条固定候选；预览10分钟内需明确确认，预览及提交使用不同UUID保持幂等，进行中任务每邮箱最多2个、全实例最多4个。批次从预览创建起24小时截止，已变化、策略阻止或预览不可重试的记录不会被强行排队。
-
-仍由同一个 scheduled 在既有 Webhook 传输之后，每轮最多执行5项安全重新排队，实际HTTP留给后续cron及原签名/重试机制。进度区分重新排队、跳过、失败与未知；unknown不假装完成，只读核对既有单条重试审计，不盲目发送。批次记录可关联原投递和审计，不重评原跳过决定、不延长导出文件有效期。详见[失败通知批量重试](async-export-notification-retry-batches.md)。
-
-批量任务可停止尚未执行的条目、手动核对未知收据并分页查看操作历史，已执行结果保留。应用0018迁移后仍为53张表，复用Owner权限与现有幂等收据，详见[取消与未知结果对账](async-export-notification-retry-controls.md)。
-
-批次完成与异常通知使用0019增量迁移，新增不可变快照及准入收据表，当前54张STRICT表。Owner提醒独立于外部通知策略；三个Owner级Webhook topic沿用原签名、静默、限频与失败退避，不增加绑定或Worker。详见[批次完成与异常通知](retry-batch-notifications.md)。
-
-批量任务通知支持Owner查看原决定/跳过原因、投递状态、传输尝试和手动重试收据。重新排队复用原冻结身份、当前策略及UUID/版本幂等，专用和通用Webhook入口采用相同校验；无新迁移或绑定，仍54张表。详见[批次通知投递追踪](retry-batch-notification-deliveries.md)。
+逐阶段云端结果及待验收项目统一见[实际部署验证](cloudflare-live-validation.md)。公开记录不包含真实账户、Owner邮箱、资源ID或凭据，不将模拟验证记作实际安装成功。

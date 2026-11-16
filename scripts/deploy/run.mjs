@@ -5,6 +5,7 @@ import {spawn} from 'node:child_process';
 import {parseJsonc,syncConfig} from '../sync-svelte-config.mjs';
 import {DeploymentError,assertTemplate,requireDeployableInput,makeRuntimeConfig,deploymentPlan,validateDeploymentInput} from './plan.mjs';
 import {CloudflareClient} from './cloudflare.mjs';
+import {assertWranglerLoginAllowed,readWranglerLoginToken} from './wrangler-auth.mjs';
 
 function confined(root,path){const target=resolve(root,path),part=relative(root,target);if(part.startsWith('..')||isAbsolute(part))throw new DeploymentError('unsafe_deployment_path');return target;}
 async function rejectSymlink(path){try{if((await lstat(path)).isSymbolicLink())throw new DeploymentError('unsafe_deployment_path');}catch(error){if(error.code!=='ENOENT')throw error;}}
@@ -45,16 +46,25 @@ export function packageRunner({root,environment=process.env,log=console.log}){
     });
   };
 }
-export async function deployProject({root=process.cwd(),input,apply=false,reuseExisting=false,environment=process.env,client,run,log=console.log}={}){
+export async function deployProject({root=process.cwd(),input,apply=false,reuseExisting=false,useWranglerLogin=false,environment=process.env,client,run,log=console.log,
+  readLoginToken=readWranglerLoginToken}={}){
   root=resolve(root);input=validateDeploymentInput(input,environment);
+  if(typeof useWranglerLogin!=='boolean')throw new DeploymentError('invalid_deployment_input');
+  if(useWranglerLogin)assertWranglerLoginAllowed(environment);
   const configPath=confined(root,'wrangler.jsonc');await rejectSymlink(configPath);
   const original=await readFile(configPath,'utf8'),template=parseJsonc(original);assertTemplate(template);
   const plan=deploymentPlan(input,{reuseExisting});
   if(!apply)return plan; // No cloud calls, progress writes, commands or credential requirements for a plan.
   requireDeployableInput(input);
-  if(!client&&!environment.CLOUDFLARE_API_TOKEN)throw new DeploymentError('cloudflare_api_token_required');
+  let controlToken=environment.CLOUDFLARE_API_TOKEN;
+  if(!client&&!controlToken){
+    if(!useWranglerLogin)throw new DeploymentError('cloudflare_api_token_required');
+    controlToken=await readLoginToken({root,environment});
+  }
   const execute=run??packageRunner({root,environment:{...environment,CLOUDFLARE_ACCOUNT_ID:input.accountId},log});
-  const api=client??new CloudflareClient({accountId:input.accountId,token:environment.CLOUDFLARE_API_TOKEN});
+  // The captured token remains in this control-plane client's private memory only.
+  // Wrangler migration/upload commands retain their original environment and refresh login themselves.
+  const api=client??new CloudflareClient({accountId:input.accountId,token:controlToken});
   const directory=confined(root,'.agent-mail');await rejectSymlink(directory);await mkdir(directory,{recursive:true});
   const statePath=join(directory,'deploy-state.json'),lockPath=join(directory,'deploy.lock');await rejectSymlink(statePath);await rejectSymlink(lockPath);
   let lock;

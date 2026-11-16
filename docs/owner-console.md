@@ -1,6 +1,6 @@
 # Owner 控制台
 
-入口为 `/owner/mailboxes`。邮箱页面、管理 API 和原有 fetch/email/scheduled 始终在同一个 Worker。邮箱和邮件功能保留初始22张表；[MCP OAuth](oauth.md) 使用0002追加的7张表，侧栏“MCP 授权”可撤销客户端访问。
+入口为 `/owner/mailboxes`，首次部署先完成 `/owner/setup`。邮箱页面、管理 API 和原有 fetch/email/scheduled 始终在同一个 Worker。当前最新迁移为0020，共56张 STRICT 表；侧栏“MCP 授权”可撤销[远程客户端 OAuth](oauth.md)访问。
 
 ## 已实现的操作
 
@@ -18,7 +18,7 @@ Token 列表中的日期按 UTC 显示，API 使用 UTC Unix 毫秒。邮箱设�
 
 ## Cloudflare Access 配置
 
-1. 为控制台的真实域名创建 Access Self-hosted 应用，策略只允许 Owner 邮箱。应用应覆盖控制台页面、`/owner/api/*` 以及页面加载请求；按整个 console hostname 保护最简单。
+1. 为控制台创建 Access Self-hosted 应用，策略只允许 Owner 邮箱。独立控制台域名可保护整个 hostname；与 API 共用 workers.dev 地址时，应用范围使用 `hostname/owner`，覆盖父路径及其子路由。不要启用保护整个 Worker 的 Access 开关，否则公开 MCP/OAuth 端点也会被拦截。完整配置顺序见[部署与初始化](deployment.md)。
 2. 在根 `wrangler.jsonc` 配置 `OWNER_EMAIL`、`ACCESS_TEAM_DOMAIN`（`https://<team>.cloudflareaccess.com`）、`ACCESS_AUD`（应用 AUD）、`CONSOLE_ORIGIN` 与 `API_ORIGIN`。不要修改生成的 `wrangler.svelte.jsonc`。
 3. 将 console / api 域名绑定到同一个 Worker。Agent Bearer API 可使用独立 api hostname，不需要交互式 Access 登录。
 4. 浏览器经 Access 登录后，Worker 验证 `Cf-Access-Jwt-Assertion` 的 RS256 签名、issuer、audience、exp、nbf 与 Owner email，而不是相信身份提示头。直接访问 workers.dev 的 Owner 路径也不会跳过验证。

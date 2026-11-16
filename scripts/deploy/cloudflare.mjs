@@ -153,7 +153,10 @@ export class CloudflareClient {
     let processed = 0;
     const seen = new Set();
     for (let page = 1; page <= MAX_PAGES; page++) {
-      const envelope = await this.#request(operation, 'GET', ['d1', 'database'], { query: { name, page, per_page: 100 } });
+      // D1's total_count describes the whole account, even when `name` filters results.
+      // Scan unfiltered pages so short pages and totals cannot make an existing target
+      // appear absent (or reject a valid lookup) in accounts with other databases.
+      const envelope = await this.#request(operation, 'GET', ['d1', 'database'], { query: { page, per_page: 100 } });
       if (!Array.isArray(envelope.result)) fail('cloudflare_invalid_response', operation);
       for (const result of envelope.result) {
         const record = d1Record(result, operation);

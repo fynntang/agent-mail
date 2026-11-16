@@ -5,7 +5,10 @@ import { tmpdir } from 'node:os';
 import { resolve, join, dirname, basename } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import {EventEmitter} from 'node:events';
+import {PassThrough} from 'node:stream';
 import { deployProject, packageRunner } from '../../scripts/deploy/run.mjs';
+import {readWranglerLoginToken} from '../../scripts/deploy/wrangler-auth.mjs';
 import { validateDeploymentInput, requireDeployableInput, makeRuntimeConfig } from '../../scripts/deploy/plan.mjs';
 import { parseJsonc, HTTP_ENTRY, RUNTIME_ENTRY, createAdapterConfig, REQUIRED_COMPATIBILITY_FLAGS } from '../../scripts/sync-svelte-config.mjs';
 
@@ -432,4 +435,89 @@ test('packageRunner rejects npm/corepack execution shims instead of losing Wrang
     }, code('pnpm_required'));
     assert.deepEqual(logs, []);
   }
+});
+
+function fakeAuthProcess({stdout='',stderr='',exitCode=0,hang=false,throws=false}={}){
+  const calls=[];
+  const spawnCommand=(...args)=>{
+    calls.push(args);if(throws)throw Error(`PRIVATE_SPAWN_FAILURE_${TOKEN}`);
+    const child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();child.killed=false;
+    child.kill=signal=>{child.killed=signal;child.stdout.destroy();child.stderr.destroy();return true;};
+    calls.at(-1).child=child;
+    if(!hang)queueMicrotask(()=>{child.stdout.end(stdout);child.stderr.end(stderr);child.emit('close',exitCode);});
+    return child;
+  };
+  return{calls,spawnCommand};
+}
+
+test('explicit Wrangler login uses the supported fixed CLI with bounded private output and disabled diagnostics',async()=>{
+  for(const type of ['oauth','api_token']){
+    const f=fakeAuthProcess({stdout:JSON.stringify({type,token:TOKEN})});
+    const environment={TEST_RETAINED:'yes',WRANGLER_WRITE_LOGS:'true',WRANGLER_LOG:'debug',WRANGLER_LOG_SANITIZE:'false',WRANGLER_SEND_METRICS:'true'};
+    assert.equal(await readWranglerLoginToken({root:process.cwd(),environment,spawnCommand:f.spawnCommand,resolveEntrypoint:()=>'/fixture/wrangler-cli.cjs'}),TOKEN);
+    const [executable,args,options]=f.calls[0];assert.equal(executable,process.execPath);assert.deepEqual(args,['/fixture/wrangler-cli.cjs','auth','token','--json']);
+    assert.equal(options.cwd,resolve(process.cwd()));assert.equal(options.shell,false);assert.equal(options.windowsHide,true);assert.deepEqual(options.stdio,['ignore','pipe','pipe']);
+    assert.equal(options.env.WRANGLER_WRITE_LOGS,'false');assert.equal(options.env.WRANGLER_LOG,'error');assert.equal(options.env.WRANGLER_LOG_SANITIZE,'true');assert.equal(options.env.WRANGLER_SEND_METRICS,'false');assert.equal(options.env.CI,'true');assert.equal(options.env.TEST_RETAINED,'yes');
+    assert.equal(environment.WRANGLER_LOG,'debug','Do not change the caller environment');
+  }
+});
+
+test('Wrangler login rejects CI before resolving or spawning and rejects malformed or global-key output without disclosure',async()=>{
+  for(const environment of [{CI:'true'},{WORKERS_CI:'1'}])await assert.rejects(readWranglerLoginToken({environment,resolveEntrypoint:()=>assert.fail('Must not resolve a local login in CI')}),code('wrangler_login_not_allowed'));
+  const cases=[['bad JSON','wrangler_login_invalid_response'],[JSON.stringify({type:'api_key',key:TOKEN,email:'private@agentmail.test'}),'wrangler_login_unsupported_credentials'],
+    [JSON.stringify({type:'oauth',token:' '+TOKEN}),'wrangler_login_invalid_response'],[JSON.stringify({type:'oauth',token:TOKEN,unexpected:TOKEN}),'wrangler_login_invalid_response'],
+    [JSON.stringify({type:'unknown',token:TOKEN}),'wrangler_login_invalid_response']];
+  for(const [stdout,expected] of cases){const f=fakeAuthProcess({stdout});await assert.rejects(readWranglerLoginToken({environment:{},spawnCommand:f.spawnCommand,resolveEntrypoint:()=>'/fixture/wrangler-cli.cjs'}),error=>{assert.equal(error.code,expected);assert.ok(!JSON.stringify(error).includes(TOKEN));assert.ok(!String(error).includes(TOKEN));return true;});}
+});
+
+test('Wrangler login bounds both streams and time, kills failed children and never forwards sensitive stderr',async()=>{
+  for(const options of [{stdout:'x'.repeat(16*1024+1)},{stderr:'x'.repeat(16*1024+1)}]){
+    const f=fakeAuthProcess(options);await assert.rejects(readWranglerLoginToken({environment:{},spawnCommand:f.spawnCommand,resolveEntrypoint:()=>'/fixture/wrangler-cli.cjs'}),code('wrangler_login_response_too_large'));assert.equal(f.calls[0].child.killed,'SIGKILL');
+  }
+  const hanging=fakeAuthProcess({hang:true});await assert.rejects(readWranglerLoginToken({environment:{},spawnCommand:hanging.spawnCommand,resolveEntrypoint:()=>'/fixture/wrangler-cli.cjs',timeoutMs:5}),code('wrangler_login_timeout'));assert.equal(hanging.calls[0].child.killed,'SIGKILL');
+  for(const options of [{stderr:`PRIVATE_AUTH_DIAGNOSTIC_${TOKEN}`,exitCode:1},{throws:true}]){
+    const f=fakeAuthProcess(options);await assert.rejects(readWranglerLoginToken({environment:{},spawnCommand:f.spawnCommand,resolveEntrypoint:()=>'/fixture/wrangler-cli.cjs'}),error=>{assert.equal(error.code,'wrangler_login_unavailable');assert.ok(!String(error).includes(TOKEN));return true;});
+  }
+  await assert.rejects(readWranglerLoginToken({environment:{},resolveEntrypoint:()=>{throw Error(TOKEN);}}),code('wrangler_login_unavailable'));
+});
+
+test('Wrangler login opt-in never reads credentials for an offline plan or changes default token requirements',async t=>{
+  const f=await fixture(t);let reads=0;const readLoginToken=async()=>{reads++;throw Error('Unexpected real credential lookup');};
+  assert.equal((await deployProject({root:f.root,input,environment:{},useWranglerLogin:true,readLoginToken})).mode,'plan');
+  await assert.rejects(deployProject({root:f.root,input,apply:true,environment:{},readLoginToken}),code('cloudflare_api_token_required'));
+  for(const environment of [{CI:'true'},{WORKERS_CI:'1'}])await assert.rejects(deployProject({root:f.root,input,apply:true,useWranglerLogin:true,environment,readLoginToken}),code('wrangler_login_not_allowed'));
+  assert.equal(reads,0);assert.equal(await readFile(join(f.root,'wrangler.jsonc'),'utf8'),f.original);assert.deepEqual(await readdir(f.root),['wrangler.jsonc']);
+});
+
+test('explicit local login is captured only for control-plane requests, never stored in state, config, output or command options',async t=>{
+  const f=await fixture(t),requests=[],logs=[],environment={npm_execpath:await fakePackageManager(f)};let reads=0;
+  const originalEnvironment={...environment};
+  const originalFetch=globalThis.fetch;t.after(()=>{globalThis.fetch=originalFetch;});
+  globalThis.fetch=async(url,init)=>{
+    requests.push({url:String(url),init});assert.equal(init.headers.Authorization,`Bearer ${TOKEN}`);const path=new URL(url).pathname;
+    let result;
+    if(init.method==='GET'&&path.endsWith('/d1/database'))result=[];
+    else if(init.method==='GET'&&path.endsWith('/r2/buckets'))result={buckets:[]};
+    else if(init.method==='GET'&&path.includes('/workers/scripts/'))return new Response(null,{status:404});
+    else if(init.method==='POST'&&path.endsWith('/d1/database'))result={uuid:ID,name:input.databaseName};
+    else if(init.method==='POST'&&path.endsWith('/r2/buckets'))result={name:input.bucketName};
+    else assert.fail(`Unexpected fixture API path ${path}`);
+    return Response.json({success:true,result});
+  };
+  const readLoginToken=async options=>{reads++;assert.equal(options.environment,environment);assert.equal(options.root,f.root);return TOKEN;};
+  const result=await deployProject({root:f.root,input,apply:true,useWranglerLogin:true,environment,readLoginToken,log:line=>logs.push(line)});
+  assert.equal(reads,1);assert.equal(result.mode,'applied');assert.equal(requests.length,5);assert.deepEqual(environment,originalEnvironment);
+  const commands=logs.map(line=>JSON.parse(line));assert.deepEqual(commands.map(value=>value.args),[CHECK,BUILD,MIGRATE,UPLOAD]);
+  for(const command of commands)assert.deepEqual(command.credentials,Object.fromEntries(CREDENTIAL_KEYS.map(key=>[key,null])),'Captured login credentials must not enter any command environment');
+  for(const value of [result,await f.state(),await f.read('wrangler.jsonc'),parseJsonc(await readFile(join(f.root,'wrangler.svelte.jsonc'),'utf8')),logs])assert.equal(JSON.stringify(value).includes(TOKEN),false);
+});
+
+test('CLI accepts explicit login only locally, documents it, and leaves offline plans credential-free',async t=>{
+  const f=await fixture(t),cli=fileURLToPath(new URL('../../scripts/deploy.mjs',import.meta.url));await writeFile(join(f.root,'deploy.config.json'),JSON.stringify(input));
+  const local=spawnSync(process.execPath,[cli,'--use-wrangler-login'],{cwd:f.root,env:{},encoding:'utf8',windowsHide:true,timeout:10_000});assert.equal(local.status,0,local.stderr);assert.equal(JSON.parse(local.stdout).mode,'plan');
+  const help=spawnSync(process.execPath,[cli,'--help'],{cwd:f.root,env:{},encoding:'utf8',windowsHide:true,timeout:10_000});assert.equal(help.status,0);assert.ok(help.stdout.includes('--use-wrangler-login'));
+  for(const environment of [{CI:'true'},{WORKERS_CI:'1'}]){
+    const ci=spawnSync(process.execPath,[cli,'--apply','--use-wrangler-login'],{cwd:f.root,env:environment,encoding:'utf8',windowsHide:true,timeout:10_000});assert.equal(ci.status,1);assert.equal(JSON.parse(ci.stderr).error,'wrangler_login_not_allowed');
+  }
+  assert.equal(await readFile(join(f.root,'wrangler.jsonc'),'utf8'),f.original);assert.deepEqual((await readdir(f.root)).sort(),['deploy.config.json','wrangler.jsonc']);
 });
