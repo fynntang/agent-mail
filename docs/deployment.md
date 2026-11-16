@@ -54,6 +54,21 @@ Wrangler OAuth 的部署授权不包含 Access 应用管理。Access 专用 Toke
 
 直接将普通 Git 仓库接入 Workers Builds 时，需要先配置实际 D1/R2 绑定；没有预配资源可使用下方本地部署器创建。`.dev.vars.example` 会被按钮识别为 Secret 模板，因此仅保留注释；完整本地示例位于 `.dev.vars.local.example`，避免 localhost、Owner 等示例值覆盖生产变量。
 
+### 按钮提示无法获取存储库内容
+
+先区分导入仓库失败与构建失败。若配置表单尚未出现、没有构建记录，则检查仓库读取请求，不要先修改应用代码、迁移或 D1/R2。
+
+仓库网页能打开，不代表导入页面的 GitHub REST 请求也成功。本次真实排查中，带认证请求可以读取公开仓库与 `wrangler.jsonc`，系统网络的匿名仓库/文件列表请求却返回403，且 `X-RateLimit-Remaining: 0`。这与导入报错吻合，但应以浏览器 Network 中实际失败的请求确认原因，不能仅凭页面文字认定仓库私有或源码错误。
+
+| 失败请求的结果 | 处理方式 |
+| --- | --- |
+| GitHub 403/429，剩余额度为0 | 按 `X-RateLimit-Reset` 或 `Retry-After` 等待后再试，停止反复刷新。匿名 REST 配额按来源 IP 计算；登录 Cloudflare 或打开 GitHub 网页不一定让导入请求携带 GitHub API 认证。 |
+| 仓库或内容接口404 | 核对按钮中的公开源仓库 URL、默认分支和路径；已有 Git 连接还需核对 Cloudflare GitHub App 的仓库访问范围。 |
+| 网络失败、Cloudflare 安全验证或登录页面 | 先完成正常浏览器登录及页面要求的人工验证；保存不含凭据的失败端点、状态和错误文字，区分网络与应用构建问题。 |
+| 已有构建记录且执行命令失败 | 查看对应构建日志，再按失败的命令、绑定或变量排查；这时才属于构建/部署阶段。 |
+
+不要在页面、URL 或截图中填入 GitHub/Cloudflare Token。官方说明见[GitHub REST 配额与等待规则](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)和[Cloudflare GitHub 集成](https://developers.cloudflare.com/workers/ci-cd/builds/git-integration/github-integration/)。需要先使用实例时，可以采用已验证的本地部署器；这不能替代官方按钮的完整验收。
+
 ## 本地部署
 
 需要 Node.js 24、pnpm 11.25.0，以及填写好的 `deploy.config.json`：
