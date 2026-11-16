@@ -3,7 +3,7 @@
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Ffynntang%2Fagent-mail)
 [![Deploy Worker with GitHub Actions](https://img.shields.io/badge/Deploy_Worker-GitHub_Actions-2088FF?logo=githubactions&logoColor=white)](https://github.com/fynntang/agent-mail/actions/workflows/deploy.yml)
 
-Cloudflare 标准按钮用于公开仓库，自动配置 D1/R2；当前私有仓库可用 GitHub Actions 按钮。点击前请阅读[按钮部署步骤](docs/deployment.md#部署按钮)，填写账户、邮件域名及 Owner 邮箱；Access、邮件路由和发送服务通过部署后的向导配置。
+本仓库已公开，可通过 Cloudflare 标准按钮开始部署并配置 D1/R2，也可 Fork 后使用自己仓库的 GitHub Actions。点击前请阅读[按钮部署步骤](docs/deployment.md#部署按钮)，填写账户、邮件域名及 Owner 邮箱；Access、邮件路由和发送服务通过部署后的向导配置。
 
 面向个人自部署的 Agent 邮箱服务：一个 Cloudflare 账户中运行一个实例，管理多个独立邮箱，为不同 Agent 签发严格绑定邮箱的 Token，逐步提供 API / MCP 收发邮件能力。
 

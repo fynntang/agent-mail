@@ -6,7 +6,7 @@
 
 ## 部署按钮
 
-README 提供两个入口。Cloudflare 标准按钮克隆公开 GitHub 仓库并建立 Workers Builds，按 Wrangler 绑定配置 D1/R2。Cloudflare 明确要求源仓库为公开仓库，私有仓库可使用本仓库的 GitHub Actions 按钮；Fork 后请从自己仓库的 Actions 进入 `Deploy personal Agent Mail`，配置下文的变量及 Secret 后手动运行。[官方按钮与资源说明](https://developers.cloudflare.com/workers/platform/deploy-buttons/)
+本仓库已公开，README 的 Cloudflare 标准按钮可克隆本仓库并建立 Workers Builds，按 Wrangler 绑定配置 D1/R2。GitHub Actions 是另一个入口：Fork 后请从自己仓库的 Actions 进入 `Deploy personal Agent Mail`，配置下文的变量及 Secret 后手动运行。[官方按钮与资源说明](https://developers.cloudflare.com/workers/platform/deploy-buttons/)
 
 使用 Cloudflare 标准按钮时：
 
@@ -166,7 +166,7 @@ pnpm deploy:setup -- --input deploy.config.json --reuse-existing
 
 在 Actions → Deploy personal Agent Mail → Run workflow 点击运行。初次创建保持 `reuse_existing=false`；GitHub runner 没有上次本地状态，更新或中断后继续时，需要核对名称后显式选择 true。并发组防止同仓库同时发布，凭据仅注入最终部署步骤，既不写仓库也不放入运行时。
 
-README 已提供标准Cloudflare按钮及本仓库Actions入口。标准按钮要求源仓库公开；保持私有时可通过Actions运行已配置的部署工作流。按钮入口和部署失败处理经过本地模拟，但尚未在真实Cloudflare账户完成安装验收；生产使用建议固定已审阅版本。Cloudflare预配不替代邮件或Access接入。[Deploy 按钮](https://developers.cloudflare.com/workers/platform/deploy-buttons/)、[Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/)。
+README 已提供标准Cloudflare按钮及本仓库Actions入口。公开源仓库可通过标准按钮开始部署；也可Fork后从自己的Actions运行已配置的部署工作流。按钮入口和部署失败处理经过本地模拟，但尚未在真实Cloudflare账户完成安装验收；生产使用建议固定已审阅版本。Cloudflare预配不替代邮件或Access接入。[Deploy 按钮](https://developers.cloudflare.com/workers/platform/deploy-buttons/)、[Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/)。
 
 ## 开源发布与卸载
 
